@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Assure Docs · Assessments</title>
+    <style>
+        /* same base – abbreviated */
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Inter',sans-serif; background:#f8fafc; color:#0b1a33; line-height:1.6; }
+        a { text-decoration:none; color:inherit; }
+        :root {
+            --primary:#0b2b5c; --primary-light:#1a3f7a; --accent:#2563eb;
+            --accent-light:#dbeafe; --gray:#64748b; --gray-light:#f1f5f9;
+            --border:#e2e8f0; --white:#ffffff; --shadow:0 4px 24px rgba(0,0,0,0.06);
+            --shadow-hover:0 8px 40px rgba(0,0,0,0.10); --radius:14px; --transition:all 0.25s ease;
+        }
+        nav { display:flex; align-items:center; justify-content:space-between; padding:0 48px; height:76px; background:var(--white); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1000; backdrop-filter:blur(8px); background:rgba(255,255,255,0.92); }
+        .nav-logo { font-size:24px; font-weight:800; color:var(--primary); }
+        .nav-logo span { font-weight:300; color:var(--gray); }
+        .nav-links { display:flex; list-style:none; gap:6px; }
+        .nav-links li a { padding:8px 20px; border-radius:8px; font-size:15px; font-weight:500; color:var(--gray); transition:var(--transition); }
+        .nav-links li a:hover { background:var(--gray-light); color:var(--primary); }
+        .nav-links li a.active { background:var(--accent-light); color:var(--accent); font-weight:600; }
+        .nav-cta { display:flex; gap:12px; }
+        .btn { padding:10px 28px; border-radius:40px; font-size:14px; font-weight:600; border:none; cursor:pointer; transition:var(--transition); display:inline-block; }
+        .btn-primary { background:var(--accent); color:var(--white); }
+        .btn-primary:hover { background:#1d4ed8; transform:translateY(-2px); box-shadow:0 8px 24px rgba(37,99,235,0.30); }
+        .btn-outline { background:transparent; color:var(--primary); border:2px solid var(--border); }
+        .btn-outline:hover { background:var(--gray-light); border-color:var(--primary); }
+
+        .assessment-section {
+            background: var(--primary);
+            color: var(--white);
+            padding: 80px 48px 100px;
+            text-align: center;
+        }
+        .assessment-section h2 {
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+        .assessment-section p {
+            font-size: 18px;
+            color: #94a3b8;
+            max-width: 640px;
+            margin: 0 auto 40px;
+        }
+        .assessment-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px,1fr));
+            gap: 30px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .assessment-item {
+            background: rgba(255,255,255,0.06);
+            backdrop-filter: blur(4px);
+            padding: 28px 20px;
+            border-radius: var(--radius);
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .assessment-item .icon { font-size:32px; margin-bottom:12px; display:block; }
+        .assessment-item h4 { font-size:18px; font-weight:600; margin-bottom:6px; }
+        .assessment-item p { font-size:14px; color:#94a3b8; }
+
+        .footer { background:#0b1a33; color:#94a3b8; padding:40px 48px 30px; text-align:center; border-top:1px solid #1e2d4a; }
+        .footer a { color:var(--accent-light); }
+        .footer .footer-links { display:flex; justify-content:center; gap:30px; margin-bottom:20px; flex-wrap:wrap; }
+        .footer .footer-links a { color:#94a3b8; font-size:14px; }
+        .footer .footer-links a:hover { color:white; }
+
+        @media (max-width:768px) {
+            nav { padding:0 20px; flex-wrap:wrap; height:auto; gap:10px; padding-top:12px; }
+            .nav-links { order:3; width:100%; justify-content:center; gap:4px; padding:8px 0; border-top:1px solid var(--border); }
+            .nav-links li a { font-size:13px; padding:6px 12px; }
+            .nav-cta .btn { padding:6px 14px; font-size:12px; }
+            .assessment-section { padding:50px 20px 70px; }
+            .assessment-section h2 { font-size:28px; }
+            .assessment-grid { grid-template-columns:1fr 1fr; }
+        }
+        @media (max-width:480px) { .assessment-grid { grid-template-columns:1fr; } }
+    </style>
+</head>
+<body>
+
+<nav>
+    <div class="nav-logo">Assure <span>Docs</span></div>
+    <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="features.html">Features</a></li>
+        <li><a href="verify.html">Verify</a></li>
+        <li><a href="assessments.html" class="active">Assessments</a></li>
+    </ul>
+    <div class="nav-cta">
+        <a href="login.html" class="btn btn-outline">Log in</a>
+        <a href="signup.html" class="btn btn-primary">Get Started</a>
+    </div>
+</nav>
+
+<section class="assessment-section">
+    <h2>Clear Assessments. Confident Decisions.</h2>
+    <p>Assure Docs provides transparent risk levels, automated assessments, and audit‑ready reports. Know every applicant’s risk profile instantly.</p>
+    <div class="assessment-grid">
+        <div class="assessment-item"><span class="icon">📊</span><h4>Risk Levels</h4><p>Clear, actionable risk scoring</p></div>
+        <div class="assessment-item"><span class="icon">📋</span><h4>Automated Reports</h4><p>Audit‑ready documentation</p></div>
+        <div class="assessment-item"><span class="icon">🎯</span><h4>Fraud Signals</h4><p>Instant anomaly detection</p></div>
+        <div class="assessment-item"><span class="icon">📈</span><h4>Decision Confidence</h4><p>Data‑driven insights</p></div>
+    </div>
+</section>
+
+<footer class="footer">
+    <div class="footer-links">
+        <a href="index.html">Home</a>
+        <a href="features.html">Features</a>
+        <a href="verify.html">Verify</a>
+        <a href="assessments.html">Assessments</a>
+        <a href="#">Privacy</a>
+        <a href="#">Terms</a>
+    </div>
+    <p>&copy; 2026 <a href="index.html">Assure Docs</a>. All rights reserved.</p>
+</footer>
+
+</body>
+</html>
