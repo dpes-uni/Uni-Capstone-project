@@ -44,7 +44,7 @@ BUSINESS_END_HOUR = 18
 # Model Configuration
 # ==========================================================
 
-MODEL_FILENAME = "risk_model.pkl"
+MODEL_FILENAME = "login_risk_model.pkl"
 
 
 # ==========================================================
