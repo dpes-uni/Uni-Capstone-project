@@ -5,6 +5,7 @@ const OtpToken = require('../models/OtpToken');
 const { scoreLogin } = require('../utils/riskEngine');
 const { sendEmail } = require('../utils/sendEmail');
 const { generateOtp, hashOtp } = require('../utils/otp');
+const logger = require('../utils/logger');
 const {
   generateAuthToken,
   generateRandomToken,
@@ -75,7 +76,7 @@ async function register(req, res, next) {
         : 'SMTP is not configured. In development, the OTP is available below.',
       signupId: otpDoc._id,
       email: normalizedEmail,
-
+      ...(delivered ? {} : { devOtpCode: code }),
     });
   } catch (err) {
     next(err);
@@ -258,7 +259,8 @@ async function login(req, res, next) {
     const isNewDevice = !user.trustedDevices.some((d) => d.deviceHash === deviceHash);
     const isNewIp = !user.trustedDevices.some((d) => d.ip === ip);
 
-    const risk = scoreLogin({
+    // Rule-based risk assessment
+    const ruleRisk = scoreLogin({
       user,
       deviceHash,
       ip,
@@ -267,6 +269,49 @@ async function login(req, res, next) {
       recentFailedAttempts: user.failedLoginAttempts,
     });
 
+    // AI-based risk assessment (Python anomaly-detection service).
+    // Falls back to the rule-based result if the AI service is unreachable.
+    let aiRisk = { score: 0, level: 'low', reasons: [], mfaRequired: false };
+    let finalRisk = ruleRisk;
+
+    try {
+      const aiService = require('../services/aiService');
+      const loginAttemptData = await aiService.buildLoginAttempt(
+        user,
+        deviceHash,
+        ip,
+        userAgent,
+        req,
+        user.failedLoginAttempts
+      );
+
+      const aiResult = await aiService.assessRisk(loginAttemptData);
+
+      aiRisk = {
+        score: aiResult.risk_score,
+        level: aiResult.risk_level.toLowerCase(),
+        reasons: [aiResult.reason],
+        mfaRequired: aiResult.recommended_action !== 'Allow Login',
+      };
+
+      // Combine rule-based and AI assessments, taking the higher risk.
+      const levelPriority = { low: 1, medium: 2, high: 3 };
+      finalRisk = {
+        score: Math.max(ruleRisk.score, aiRisk.score),
+        level:
+          levelPriority[ruleRisk.level] >= levelPriority[aiRisk.level]
+            ? ruleRisk.level
+            : aiRisk.level,
+        mfaRequired: ruleRisk.mfaRequired || aiRisk.mfaRequired,
+        reasons: [...ruleRisk.reasons, ...aiRisk.reasons],
+      };
+    } catch (aiError) {
+      logger.warn('AI service unavailable, falling back to rule-based risk assessment', {
+        error: aiError.message,
+      });
+      finalRisk = ruleRisk;
+    }
+
     const activity = await LoginActivity.create({
       user: user._id,
       ip,
@@ -274,9 +319,9 @@ async function login(req, res, next) {
       deviceHash,
       isNewDevice,
       isNewIp,
-      riskScore: risk.score,
-      riskLevel: risk.level,
-      riskReasons: risk.reasons,
+      riskScore: finalRisk.score,
+      riskLevel: finalRisk.level,
+      riskReasons: finalRisk.reasons,
       mfaRequired: true,
       mfaVerified: false,
       success: false, // becomes true once the session is actually issued
@@ -304,18 +349,23 @@ async function login(req, res, next) {
       subject: 'Your Assure Docs verification code',
       text: `Your one-time passcode is ${code}. It expires in ${
         process.env.OTP_EXPIRES_MINUTES || 10
-      } minutes. Reason for extra verification: ${risk.reasons.join('; ')}`,
+      } minutes. Reason for extra verification: ${finalRisk.reasons.join('; ')}`,
       html: `<p>Your one-time passcode is <strong>${code}</strong>.</p><p>It expires in ${
         process.env.OTP_EXPIRES_MINUTES || 10
-      } minutes.</p><p>Reason for extra verification: ${risk.reasons.join('; ')}</p>`,
+      } minutes.</p><p>Reason for extra verification: ${finalRisk.reasons.join('; ')}</p>`,
     });
 
     return res.status(200).json({
       message: 'A verification code has been sent to your email. Enter it to complete sign-in.',
       mfaRequired: true,
       loginId: otpDoc._id,
-      risk: { level: risk.level, score: risk.score, reasons: risk.reasons },
-
+      ...(delivered ? {} : { devOtpCode: code }),
+      risk: {
+        level: finalRisk.level,
+        score: finalRisk.score,
+        reasons: finalRisk.reasons,
+        aiAssessment: aiRisk.score > 0 ? aiRisk : null, // AI data when the service responded
+      },
     });
   } catch (err) {
     next(err);
@@ -433,7 +483,7 @@ async function adminSignup(req, res, next) {
         : 'SMTP is not configured. In development, the OTP is available below.',
       signupId: otpDoc._id,
       email: normalizedEmail,
-
+      ...(delivered ? {} : { devOtpCode: code }),
     });
   } catch (err) {
     next(err);

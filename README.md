@@ -74,8 +74,8 @@ You should see:
 Assure Docs API
 ----------------------------------------
 Environment : development
-Listening   : http://localhost:5000
-Health check: http://localhost:5000/api/health
+Listening   : http://localhost:5001
+Health check: http://localhost:5001/api/health
 ----------------------------------------
 ```
 
@@ -164,7 +164,8 @@ All endpoints are prefixed with `/api`.
 
 | Method | Endpoint                        | Auth | Description |
 |--------|----------------------------------|------|--------------|
-| GET    | `/health`                         | –    | Health check |
+| GET    | `/health`                         | –    | Health check (DB + AI status, uptime, memory) |
+| GET    | `/health/ready`                   | –    | Readiness probe — 503 until MongoDB is connected |
 | POST   | `/auth/register`                  | –    | Create account, sends verification email |
 | GET    | `/auth/verify-email/:token`       | –    | Verify email address |
 | POST   | `/auth/resend-verification`       | –    | Resend verification email |

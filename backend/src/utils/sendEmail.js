@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const logger = require('./logger');
 
 let transporter = null;
 
@@ -39,7 +40,7 @@ async function verifyEmailTransport() {
 
   transporter = createTransporter();
   await transporter.verify();
-  console.log(`Gmail SMTP ready: ${process.env.SMTP_USER}`);
+  logger.info(`Gmail SMTP ready: ${process.env.SMTP_USER}`);
   return true;
 }
 
@@ -52,7 +53,12 @@ async function sendEmail({ to, subject, html, text }) {
     transporter = createTransporter();
   }
 
-  if (!transporter) return { delivered: false };
+  if (!transporter) {
+    if (process.env.NODE_ENV !== 'production') {
+      logger.warn('Email not delivered (SMTP not configured). The OTP was returned as devOtpCode in the API response.');
+    }
+    return { delivered: false };
+  }
 
   await transporter.sendMail({
     from: process.env.SMTP_FROM || process.env.SMTP_USER,

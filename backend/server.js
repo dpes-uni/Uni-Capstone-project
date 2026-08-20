@@ -2,23 +2,23 @@ require('dotenv').config();
 const app = require('./src/app');
 const connectDB = require('./src/config/db');
 const { verifyEmailTransport } = require('./src/utils/sendEmail');
+const logger = require('./src/utils/logger');
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 const start = async () => {
   try {
     await connectDB();
     await verifyEmailTransport();
     app.listen(PORT, () => {
-      console.log(`\nAssure Docs API`);
-      console.log(`----------------------------------------`);
-      console.log(`Environment : ${process.env.NODE_ENV || 'development'}`);
-      console.log(`Listening   : http://localhost:${PORT}`);
-      console.log(`Health check: http://localhost:${PORT}/api/health`);
-      console.log(`----------------------------------------\n`);
+      logger.info('Assure Docs API started', {
+        environment: process.env.NODE_ENV || 'development',
+        port: PORT,
+        health: `http://localhost:${PORT}/api/health`,
+      });
     });
   } catch (err) {
-    console.error('Failed to start server:', err.message);
+    logger.error('Failed to start server', { error: err.message });
     process.exit(1);
   }
 };
@@ -26,5 +26,5 @@ const start = async () => {
 start();
 
 process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Rejection:', err);
+  logger.error('Unhandled Rejection', { error: err.message, stack: err.stack });
 });

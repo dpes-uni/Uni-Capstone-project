@@ -1,10 +1,12 @@
+const logger = require('../utils/logger');
+
 function notFound(req, res, next) {
   res.status(404).json({ message: `Route not found: ${req.method} ${req.originalUrl}` });
 }
 
 // eslint-disable-next-line no-unused-vars
 function errorHandler(err, req, res, next) {
-  console.error(err.stack || err);
+  logger.error(err.stack || err, { method: req.method, url: req.originalUrl });
 
   let statusCode = err.statusCode || (res.statusCode !== 200 ? res.statusCode : 500);
   let message = err.message || 'Internal server error';

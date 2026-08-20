@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const logger = require('../utils/logger');
 
 async function connectDB() {
   const uri = process.env.MONGO_URI;
@@ -13,16 +14,18 @@ async function connectDB() {
     const conn = await mongoose.connect(uri, {
       serverSelectionTimeoutMS: 8000,
     });
-    console.log(`MongoDB connected: ${conn.connection.host}/${conn.connection.name}`);
+    logger.info(`MongoDB connected: ${conn.connection.host}/${conn.connection.name}`);
     return conn;
   } catch (err) {
-    console.error('MongoDB connection error. Is MongoDB running and is MONGO_URI correct?');
+    logger.error('MongoDB connection error. Is MongoDB running and is MONGO_URI correct?', {
+      error: err.message,
+    });
     throw err;
   }
 }
 
 mongoose.connection.on('disconnected', () => {
-  console.warn('MongoDB disconnected.');
+  logger.warn('MongoDB disconnected.');
 });
 
 module.exports = connectDB;

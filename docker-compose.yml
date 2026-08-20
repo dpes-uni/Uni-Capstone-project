@@ -1,0 +1,127 @@
+version: '3.9'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:6
+    container_name: risk-auth-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-}
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongodb-data:/data/db
+      - ./database/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - risk-auth-network
+
+  # Backend Node.js/Express API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: risk-auth-backend
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${BACKEND_PORT:-5001}
+      MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017/assure_docs}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-key}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-jwt-refresh-secret-key}
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-service:8000}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@assure-docs.test}
+      CLIENT_URL: ${CLIENT_URL:-http://localhost:5173}
+      RISK_MEDIUM_THRESHOLD: ${RISK_MEDIUM_THRESHOLD:-30}
+      RISK_HIGH_THRESHOLD: ${RISK_HIGH_THRESHOLD:-61}
+      OTP_EXPIRY_MINUTES: ${OTP_EXPIRY_MINUTES:-10}
+      ADMIN_SIGNUP_KEY: ${ADMIN_SIGNUP_KEY:-dev-admin-signup-key-change-me}
+    ports:
+      - "${BACKEND_PORT:-5001}:5001"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5001/api/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./backend:/app
+      - backend-node-modules:/app/node_modules
+    restart: unless-stopped
+    networks:
+      - risk-auth-network
+
+  # AI Anomaly Detection Service (Python)
+  ai-service:
+    build:
+      context: ./ai
+      dockerfile: Dockerfile
+    container_name: risk-auth-ai
+    environment:
+      AI_MODEL_PATH: ${AI_MODEL_PATH:-/app/models/login_risk_model.pkl}
+      MODEL_FEATURES: ${MODEL_FEATURES:-device_fingerprint,ip_country,login_hour,failure_count,risk_score_anomaly}
+    ports:
+      - "${AI_PORT:-8000}:8000"
+    volumes:
+      - ./ai:/app
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - risk-auth-network
+
+  # Frontend React/Vite App
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: risk-auth-frontend
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:5001/api}
+      VITE_AI_SERVICE_URL: ${VITE_AI_SERVICE_URL:-http://localhost:8000}
+      VITE_JWT_SECRET: ${VITE_JWT_SECRET:-dev-jwt-secret-key}
+      VITE_ADMIN_SIGNUP_KEY: ${VITE_ADMIN_SIGNUP_KEY:-dev-admin-signup-key-change-me}
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    restart: unless-stopped
+    networks:
+      - risk-auth-network
+    depends_on:
+      - backend
+
+  # Redis (optional cache/session store for production)
+  redis:
+    image: redis:7-alpine
+    container_name: risk-auth-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - risk-auth-network
+
+networks:
+  risk-auth-network:
+    driver: bridge
+
+volumes:
+  mongodb-data:
+  backend-node-modules:
+  frontend-node-modules:
+  redis-data:
