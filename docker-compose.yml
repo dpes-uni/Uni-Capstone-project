@@ -39,6 +39,7 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@assure-docs.test}
+      REQUIRE_SMTP: ${REQUIRE_SMTP:-false}
       CLIENT_URL: ${CLIENT_URL:-http://localhost:5173}
       RISK_MEDIUM_THRESHOLD: ${RISK_MEDIUM_THRESHOLD:-30}
       RISK_HIGH_THRESHOLD: ${RISK_HIGH_THRESHOLD:-61}
