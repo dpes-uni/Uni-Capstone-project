@@ -17,6 +17,20 @@ const assessmentSchema = new mongoose.Schema(
     },
     riskScore: { type: Number, min: 0, max: 100, default: 0 },
     notes: { type: String, maxlength: 2000, default: '' },
+
+    // Metadata about the uploaded identity document. The actual file lives
+    // on disk under backend/uploads/assessments — only the reference is
+    // stored here.
+    documentFile: {
+      originalName: { type: String },
+      storedName: { type: String },
+      mimeType: { type: String },
+      size: { type: Number },
+      uploadedAt: { type: Date },
+    },
+
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    reviewedAt: { type: Date },
   },
   { timestamps: true }
 );

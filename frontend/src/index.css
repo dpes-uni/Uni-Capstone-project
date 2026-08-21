@@ -219,6 +219,9 @@ a { text-decoration: none; color: inherit; }
 .table th { color: var(--gray); font-weight: 600; font-size: 12px; text-transform: uppercase; }
 .table select { padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px; }
 .empty-state { color: var(--gray); font-size: 14px; text-align: center; padding: 20px 0; }
+.hint { color: var(--gray); font-size: 13px; margin-top: 8px; }
+.row-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.upload-label { cursor: pointer; display: inline-flex; align-items: center; }
 
 .inline-form { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 .inline-form input, .inline-form select {

@@ -1,9 +1,30 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api/axios.js';
 
+const STATUS_LABELS = {
+  pending: 'Pending',
+  in_review: 'In review',
+  verified: 'Verified',
+  rejected: 'Rejected',
+};
+
+const DOC_TYPE_LABELS = {
+  passport: 'Passport',
+  national_id: 'National ID',
+  drivers_license: "Driver's license",
+  academic_transcript: 'Academic transcript',
+  other: 'Other',
+};
+
 export default function AdminDashboard() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
+
+  const [assessments, setAssessments] = useState([]);
+  const [assessmentsLoading, setAssessmentsLoading] = useState(true);
+  const [assessmentsError, setAssessmentsError] = useState('');
+  const [viewingId, setViewingId] = useState(null);
+  const [reviewingId, setReviewingId] = useState(null);
 
   const load = () => {
     setError('');
@@ -12,7 +33,16 @@ export default function AdminDashboard() {
       .catch((err) => setError(err.response?.data?.message || 'Failed to load admin dashboard.'));
   };
 
+  const loadAssessments = () => {
+    setAssessmentsLoading(true);
+    api.get('/admin/assessments')
+      .then(({ data }) => setAssessments(data.assessments))
+      .catch((err) => setAssessmentsError(err.response?.data?.message || 'Failed to load assessments.'))
+      .finally(() => setAssessmentsLoading(false));
+  };
+
   useEffect(load, []);
+  useEffect(loadAssessments, []);
 
   const changeRole = async (id, role) => {
     try {
@@ -20,6 +50,33 @@ export default function AdminDashboard() {
       load();
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to update role.');
+    }
+  };
+
+  const viewDocument = async (id) => {
+    setAssessmentsError('');
+    setViewingId(id);
+    try {
+      const response = await api.get(`/admin/assessments/${id}/document`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(response.data);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setAssessmentsError('Failed to open document.');
+    } finally {
+      setViewingId(null);
+    }
+  };
+
+  const review = async (id, status) => {
+    setAssessmentsError('');
+    setReviewingId(id);
+    try {
+      await api.patch(`/admin/assessments/${id}/review`, { status });
+      loadAssessments();
+    } catch (err) {
+      setAssessmentsError(err.response?.data?.message || 'Failed to update assessment.');
+    } finally {
+      setReviewingId(null);
     }
   };
 
@@ -39,6 +96,88 @@ export default function AdminDashboard() {
         <div className="stat-card"><span className="stat-value">{data.stats.clients}</span><span className="stat-label">Clients</span></div>
         <div className="stat-card"><span className="stat-value">{data.stats.admins}</span><span className="stat-label">Administrators</span></div>
         <div className="stat-card"><span className="stat-value">{data.stats.verified}</span><span className="stat-label">Verified accounts</span></div>
+      </section>
+
+      <section className="panel">
+        <h2>Document verification</h2>
+        <p>Review identity documents uploaded by clients, agents, and institutions.</p>
+        {assessmentsError && <div className="alert alert-error">{assessmentsError}</div>}
+        {assessmentsLoading ? (
+          <p className="empty-state">Loading…</p>
+        ) : assessments.length === 0 ? (
+          <p className="empty-state">No assessments submitted yet.</p>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Reference</th>
+                <th>Applicant</th>
+                <th>Submitted by</th>
+                <th>Document</th>
+                <th>File</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {assessments.map((a) => (
+                <tr key={a._id}>
+                  <td><code>{a.referenceId}</code></td>
+                  <td>{a.applicantName}</td>
+                  <td>
+                    {a.owner?.name || 'Unknown'}
+                    <br />
+                    <small>{a.owner?.email}</small>
+                  </td>
+                  <td>{DOC_TYPE_LABELS[a.documentType] || a.documentType}</td>
+                  <td>
+                    {a.documentFile?.storedName ? (
+                      <span title={a.documentFile.originalName}>
+                        {a.documentFile.originalName?.length > 20
+                          ? `${a.documentFile.originalName.slice(0, 20)}…`
+                          : a.documentFile.originalName}
+                      </span>
+                    ) : (
+                      <span className="empty-state">Not uploaded</span>
+                    )}
+                  </td>
+                  <td>{STATUS_LABELS[a.status] || a.status}</td>
+                  <td>
+                    <div className="row-actions">
+                      {a.documentFile?.storedName ? (
+                        <>
+                          <button
+                            className="btn btn-outline btn-sm"
+                            disabled={viewingId === a._id}
+                            onClick={() => viewDocument(a._id)}
+                          >
+                            {viewingId === a._id ? 'Opening…' : 'View'}
+                          </button>
+                          <button
+                            className="btn btn-primary btn-sm"
+                            disabled={reviewingId === a._id || a.status === 'verified'}
+                            onClick={() => review(a._id, 'verified')}
+                          >
+                            Verify
+                          </button>
+                          <button
+                            className="btn btn-outline btn-sm"
+                            disabled={reviewingId === a._id || a.status === 'rejected'}
+                            onClick={() => review(a._id, 'rejected')}
+                          >
+                            Reject
+                          </button>
+                        </>
+                      ) : (
+                        <span className="empty-state">Awaiting upload</span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
 
       <section className="panel">
