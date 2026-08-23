@@ -26,7 +26,10 @@ class Predictor:
 
     def __init__(self):
 
-        model_path = Path("models/trained") / settings.MODEL_FILENAME
+        model_path = (
+            Path("models/trained")
+            / settings.MODEL_FILENAME
+        )
 
         if not model_path.exists():
             raise FileNotFoundError(
@@ -36,7 +39,10 @@ class Predictor:
 
         self.pipeline = joblib.load(model_path)
 
-    def predict(self, login: LoginAttempt) -> RiskResult:
+    def predict(
+        self,
+        login: LoginAttempt
+    ) -> RiskResult:
         """
         Predict the risk level for a login attempt.
 
@@ -47,37 +53,52 @@ class Predictor:
             RiskResult
         """
 
-        # -----------------------------------------
+        # --------------------------------------------------
         # Convert LoginAttempt into ML Features
-        # -----------------------------------------
+        # --------------------------------------------------
 
-        features = FeatureEngineer.to_features(login)
+        features = FeatureEngineer.to_features(
+            login
+        )
 
-        dataframe = pd.DataFrame([features])
+        dataframe = pd.DataFrame(
+            [features]
+        )
 
-        # -----------------------------------------
+        # --------------------------------------------------
         # Predict Risk Level
-        # -----------------------------------------
+        # --------------------------------------------------
 
-        prediction = self.pipeline.predict(dataframe)[0]
+        prediction = self.pipeline.predict(
+            dataframe
+        )[0]
 
-        # -----------------------------------------
-        # Optional Prediction Confidence
-        # -----------------------------------------
+        # --------------------------------------------------
+        # Prediction Confidence
+        # --------------------------------------------------
 
-        if hasattr(self.pipeline, "predict_proba"):
+        if hasattr(
+            self.pipeline,
+            "predict_proba"
+        ):
 
-            probabilities = self.pipeline.predict_proba(dataframe)[0]
+            probabilities = (
+                self.pipeline.predict_proba(
+                    dataframe
+                )[0]
+            )
 
-            confidence = max(probabilities)
+            confidence = float(
+                max(probabilities)
+            )
 
         else:
 
             confidence = 1.0
 
-        # -----------------------------------------
-        # Convert prediction to RiskLevel enum
-        # -----------------------------------------
+        # --------------------------------------------------
+        # Convert Prediction to RiskLevel
+        # --------------------------------------------------
 
         prediction = prediction.lower()
 
@@ -93,33 +114,56 @@ class Predictor:
 
             risk_level = RiskLevel.HIGH
 
-        # -----------------------------------------
+        # --------------------------------------------------
         # Determine Recommended Action
-        # -----------------------------------------
+        # --------------------------------------------------
 
         if risk_level == RiskLevel.LOW:
 
-            action = RecommendedAction.ALLOW_LOGIN
+            action = (
+                RecommendedAction.ALLOW_LOGIN
+            )
 
         elif risk_level == RiskLevel.MEDIUM:
 
-            action = RecommendedAction.REQUIRE_EMAIL_OTP
+            action = (
+                RecommendedAction.REQUIRE_EMAIL_OTP
+            )
 
         else:
 
             action = (
-                RecommendedAction.REQUIRE_ADDITIONAL_VERIFICATION
+                RecommendedAction
+                .REQUIRE_ADDITIONAL_VERIFICATION
             )
 
-        # -----------------------------------------
-        # Convert confidence to score
-        # -----------------------------------------
+        # --------------------------------------------------
+        # Convert Risk Level to Risk Score
+        #
+        # IMPORTANT:
+        # Confidence is NOT the risk score.
+        # --------------------------------------------------
 
-        risk_score = int(confidence * 100)
+        risk_scores = {
+            RiskLevel.LOW: 20,
+            RiskLevel.MEDIUM: 50,
+            RiskLevel.HIGH: 80,
+        }
+
+        risk_score = risk_scores[
+            risk_level
+        ]
+
+        # --------------------------------------------------
+        # Return Risk Result
+        # --------------------------------------------------
 
         return RiskResult(
             risk_score=risk_score,
             risk_level=risk_level,
             recommended_action=action,
-            reason=f"Machine Learning prediction ({confidence:.1%} confidence)"
+            reason=(
+                "Machine Learning prediction "
+                f"({confidence:.1%} confidence)"
+            ),
         )

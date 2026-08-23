@@ -12,6 +12,9 @@ import joblib
 import pandas as pd
 
 from models.session_event import SessionEvent
+from models.risk_level import RiskLevel
+from models.recommended_action import RecommendedAction
+from models.risk_result import RiskResult
 
 
 class SessionPredictor:
@@ -21,13 +24,12 @@ class SessionPredictor:
     """
 
     def __init__(self, model_path=None):
-        """
-        Load the trained session model.
-        """
 
         if model_path is None:
 
-            project_root = Path(__file__).resolve().parent.parent.parent
+            project_root = (
+                Path(__file__).resolve().parent.parent.parent
+            )
 
             model_path = (
                 project_root
@@ -49,30 +51,26 @@ class SessionPredictor:
     # Prediction
     # ------------------------------------------------------
 
-    def predict(self, session: SessionEvent) -> dict:
+    def predict(self, session: SessionEvent) -> RiskResult:
         """
-        Predict whether the session contains unusual activity.
+        Predict the risk level of an authenticated session.
 
-        Returns a dictionary containing:
-
-        - prediction
-        - risk_level
-        - confidence
+        Returns:
+            RiskResult
         """
 
         data = session.to_dict()
 
         dataframe = pd.DataFrame([data])
 
-        # Username is an identifier and is not used
-        # as a behavioural ML feature.
+        # Username is an identifier and is not
+        # used as a behavioural ML feature.
         if "username" in dataframe.columns:
             dataframe = dataframe.drop(
                 columns=["username"]
             )
 
-        # The target field must never be provided
-        # to the model during prediction.
+        # Target must never be supplied to the model.
         if "unusual_activity" in dataframe.columns:
             dataframe = dataframe.drop(
                 columns=["unusual_activity"]
@@ -83,24 +81,81 @@ class SessionPredictor:
             dataframe["rapid_actions"].astype(int)
         )
 
-        prediction = self.model.predict(dataframe)[0]
+        # --------------------------------------------------
+        # Model Prediction
+        # --------------------------------------------------
 
-        probabilities = self.model.predict_proba(
+        prediction = self.model.predict(
             dataframe
         )[0]
 
-        confidence = float(max(probabilities))
+        # --------------------------------------------------
+        # Prediction Confidence
+        # --------------------------------------------------
 
-        # Convert NumPy boolean to normal Python bool.
+        if hasattr(self.model, "predict_proba"):
+
+            probabilities = self.model.predict_proba(
+                dataframe
+            )[0]
+
+            confidence = float(
+                max(probabilities)
+            )
+
+        else:
+
+            confidence = 1.0
+
+        # --------------------------------------------------
+        # Convert Prediction to Risk Level
+        # --------------------------------------------------
+
         is_unusual = bool(prediction)
 
         if is_unusual:
-            risk_level = "High"
-        else:
-            risk_level = "Low"
 
-        return {
-            "unusual_activity": is_unusual,
-            "risk_level": risk_level,
-            "confidence": round(confidence, 4),
+            risk_level = RiskLevel.HIGH
+
+            action = (
+                RecommendedAction
+                .REQUIRE_ADDITIONAL_VERIFICATION
+            )
+
+        else:
+
+            risk_level = RiskLevel.LOW
+
+            action = (
+                RecommendedAction.ALLOW_LOGIN
+            )
+
+        # --------------------------------------------------
+        # Risk Score
+        #
+        # Risk score represents risk.
+        # Confidence remains separate.
+        # --------------------------------------------------
+
+        risk_scores = {
+            RiskLevel.LOW: 20,
+            RiskLevel.MEDIUM: 50,
+            RiskLevel.HIGH: 80,
         }
+
+        risk_score = risk_scores[risk_level]
+
+        # --------------------------------------------------
+        # Result
+        # --------------------------------------------------
+
+        return RiskResult(
+            risk_score=risk_score,
+            risk_level=risk_level,
+            recommended_action=action,
+            reason=(
+                "Session ML prediction: "
+                f"unusual_activity={is_unusual}, "
+                f"confidence={confidence:.1%}"
+            ),
+        )
