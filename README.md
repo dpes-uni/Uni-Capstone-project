@@ -170,29 +170,43 @@ All endpoints are prefixed with `/api`.
 | GET    | `/auth/verify-email/:token`       | –    | Verify email address |
 | POST   | `/auth/resend-verification`       | –    | Resend verification email |
 | POST   | `/auth/login`                     | –    | Step 1 of login (password check + risk score) |
-| POST   | `/auth/verify-mfa`                | –    | Step 2 of login (submit OTP code) |
-| POST   | `/auth/logout`                    | –    | Clear session cookie |
+| POST   | `/auth/verify-mfa`               | –    | Step 2 of login (submit OTP code) — returns a short-lived access JWT + httpOnly refresh cookie |
+| POST   | `/auth/refresh`                 | –    | Rotate tokens: issues a fresh access JWT using the refresh cookie, revokes the old refresh token |
+| POST   | `/auth/logout`                  | –    | Revoke the refresh token and clear cookies |
 | GET    | `/auth/me`                        | ✅   | Current user profile |
 | GET    | `/users/dashboard-summary`        | ✅   | Stats + recent activity for the dashboard |
 | GET    | `/users/login-activity`           | ✅   | Full login activity log |
 | PATCH  | `/users/me`                       | ✅   | Update name/role |
+| GET    | `/admin/overview`                 | ✅   | Admin-only system stats |
 | GET    | `/assessments`                    | ✅   | List your assessments |
 | POST   | `/assessments`                    | ✅   | Create an assessment |
 | PATCH  | `/assessments/:id`                | ✅   | Update status/notes |
 | DELETE | `/assessments/:id`                | ✅   | Delete an assessment |
+| GET    | `/metrics`                        | –    | Prometheus metrics for the backend |
 
 Protected routes accept the JWT either as `Authorization: Bearer <token>` (what the React app
 uses) or as an `httpOnly` cookie set automatically on login.
 
----
+## 7. Session & token model
 
-## 7. Troubleshooting
+Login now issues two tokens (rotate-on-refresh):
+
+- **Access token** — a short-lived (15 min) JWT sent in the `Authorization` header (and an `httpOnly`
+  `token` cookie). The React app keeps it in `localStorage`.
+- **Refresh token** — a long-lived (7 day) **opaque** token stored only in an `httpOnly` `refreshToken`
+  cookie (never in JS). It is hashed before being persisted in MongoDB.
+
+`POST /api/auth/refresh` rotates the pair: the old refresh token is **revoked** and a fresh access
++ refresh token is issued. `POST /api/auth/logout` revokes the current refresh token and clears both
+cookies. This replaces the long-lived bearer-only token model from earlier versions.
+
+## 8. Troubleshooting
 
 - **"MongoDB connection error"** — make sure `mongod` is running, or that your Atlas
   `MONGO_URI` (including username/password) is correct and your IP is allow-listed on Atlas.
 - **CORS errors in the browser console** — confirm `CLIENT_URL` in `backend/.env` matches the
   URL you're loading the frontend from (default `http://localhost:5173`).
-- **Frontend can't reach the API** — confirm the backend is running on port 5000 and
+- **Frontend can't reach the API** — confirm the backend is running on port 5001 and
   `frontend/.env`'s `VITE_API_URL` is either `/api` (proxy mode) or a full URL to your backend.
 - **"Please verify your email before signing in"** — use the dev verification link shown after
   signup, or check the backend terminal for the printed link.
@@ -202,19 +216,21 @@ uses) or as an `httpOnly` cookie set automatically on login.
 
 ---
 
-## 8. Production notes
+## 9. Production notes
 
 This is a capstone-grade reference implementation. Before deploying it for real users, consider:
 
 - Serving the frontend as a static build (`npm run build` in `frontend/`) behind a CDN or the
-  Express server itself, rather than the Vite dev server
-- Moving the JWT out of `localStorage` and relying solely on the `httpOnly` cookie already set
-  by the backend, to reduce XSS exposure
-- Adding refresh tokens / shorter-lived access tokens
+  Express server itself, rather than the Vite dev server (set `SERVE_FRONTEND=true`)
+- The access JWT still lives in `localStorage` for in-memory `Authorization` headers; the long-lived
+  refresh token is in an `httpOnly` cookie (not accessible to JS). For stronger XSS protection, drop
+  `localStorage` and rely solely on the `httpOnly` `token` cookie.
+- Refresh tokens rotate on every use and are revoked on logout (already implemented); consider
+  shortening the refresh TTL further or adding a token-allowlist DB table for revocation granularity.
 - Configuring a real SMTP provider (see section 4) and removing the `devVerificationLink` /
   `devOtpCode` fields from API responses in production (they are already only included when
   `NODE_ENV !== 'production'` or email delivery fails)
-- Adding automated tests (a `tests/` folder is already present in the original project layout)
+- Adding automated tests — see the `tests/` folders (Jest backend, Vitest frontend)
 
 
 ## Administrator signup + Gmail OTP

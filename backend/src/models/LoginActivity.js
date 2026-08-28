@@ -9,6 +9,12 @@ const loginActivitySchema = new mongoose.Schema(
     isNewDevice: { type: Boolean, default: false },
     isNewIp: { type: Boolean, default: false },
 
+    // Geolocation of the attempt, used for impossible-travel detection.
+    country: { type: String, default: 'Unknown' },
+    city: { type: String, default: 'Unknown' },
+    latitude: { type: Number, default: null },
+    longitude: { type: Number, default: null },
+
     riskScore: { type: Number, default: 0 },
     riskLevel: { type: String, enum: ['low', 'medium', 'high'], default: 'low' },
     riskReasons: { type: [String], default: [] },

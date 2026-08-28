@@ -2,28 +2,23 @@ const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const LoginActivity = require('../models/LoginActivity');
 const OtpToken = require('../models/OtpToken');
+const RefreshToken = require('../models/RefreshToken');
 const { scoreLogin } = require('../utils/riskEngine');
 const { sendEmail } = require('../utils/sendEmail');
 const { generateOtp, hashOtp } = require('../utils/otp');
 const logger = require('../utils/logger');
+const { loginAttemptsTotal, loginRiskScore, loginVerificationTotal } = require('../utils/metrics');
 const {
   generateAuthToken,
   generateRandomToken,
   hashToken,
   deviceFingerprint,
   getClientIp,
+  setAuthCookie,
+  issueRefreshToken,
+  clearAuthCookies,
+  getRefreshToken,
 } = require('../utils/generateToken');
-
-const COOKIE_NAME = 'token';
-
-function setAuthCookie(res, token) {
-  res.cookie(COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
-}
 
 // @route POST /api/auth/register
 // Creates a pending signup and ALWAYS sends a 6-digit OTP to the signup email.
@@ -214,10 +209,12 @@ async function login(req, res, next) {
     const deviceHash = deviceFingerprint(req);
 
     if (!user) {
+      loginAttemptsTotal.inc({ outcome: 'failed', risk_level: 'unknown' });
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
     if (user.isLocked()) {
+      loginAttemptsTotal.inc({ outcome: 'locked', risk_level: 'unknown' });
       const minutesLeft = Math.ceil((user.lockUntil - Date.now()) / 60000);
       return res.status(423).json({
         message: `Account temporarily locked due to repeated failed attempts. Try again in ${minutesLeft} minute(s).`,
@@ -244,14 +241,17 @@ async function login(req, res, next) {
         failureReason: 'invalid_password',
       });
 
+      loginAttemptsTotal.inc({ outcome: 'failed', risk_level: 'unknown' });
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
     if (!user.isVerified) {
+      loginAttemptsTotal.inc({ outcome: 'pending', risk_level: 'unknown' });
       return res.status(403).json({ message: 'Please verify your email before signing in' });
     }
 
-    if (adminOnly && user.role !== 'admin') {
+    if (adminOnly && user.role !== 'admin' && user.role !== 'institution') {
+      loginAttemptsTotal.inc({ outcome: 'forbidden', risk_level: 'unknown' });
       return res.status(403).json({ message: 'This login is for administrators only.' });
     }
 
@@ -312,6 +312,55 @@ async function login(req, res, next) {
       finalRisk = ruleRisk;
     }
 
+    // --- Impossible-travel detection ---
+    // Compare this attempt's location against the user's last successful login.
+    // If they are implausibly far apart in a short time window, raise the risk.
+    let activityGeo = null;
+    try {
+      const { getIpGeolocation } = require('../services/ipService');
+      const { assessImpossibleTravel } = require('../utils/geolocation');
+
+      const currentGeo = await getIpGeolocation(ip);
+      const lastLogin = await LoginActivity.findOne({
+        user: user._id,
+        success: true,
+        mfaVerified: true,
+        latitude: { $ne: null },
+      }).sort({ createdAt: -1 });
+
+      const travel = assessImpossibleTravel(
+        lastLogin
+          ? {
+              country: lastLogin.country,
+              city: lastLogin.city,
+              latitude: lastLogin.latitude,
+              longitude: lastLogin.longitude,
+              ts: new Date(lastLogin.createdAt).getTime(),
+            }
+          : null,
+        {
+          country: currentGeo.country,
+          city: currentGeo.city,
+          latitude: currentGeo.latitude,
+          longitude: currentGeo.longitude,
+          ts: Date.now(),
+        }
+      );
+
+      if (travel.impossible && travel.reason) {
+        finalRisk.reasons.push(travel.reason);
+        // Impossible travel is always treated as high risk.
+        finalRisk.score = Math.max(finalRisk.score, 80);
+        finalRisk.level = 'high';
+        finalRisk.mfaRequired = true;
+      }
+
+      // Stash current geo on the activity record below.
+      activityGeo = currentGeo;
+    } catch (geoError) {
+      logger.warn('Impossible-travel check failed', { error: geoError.message });
+    }
+
     const activity = await LoginActivity.create({
       user: user._id,
       ip,
@@ -319,6 +368,10 @@ async function login(req, res, next) {
       deviceHash,
       isNewDevice,
       isNewIp,
+      country: activityGeo?.country,
+      city: activityGeo?.city,
+      latitude: activityGeo?.latitude || null,
+      longitude: activityGeo?.longitude || null,
       riskScore: finalRisk.score,
       riskLevel: finalRisk.level,
       riskReasons: finalRisk.reasons,
@@ -354,6 +407,9 @@ async function login(req, res, next) {
         process.env.OTP_EXPIRES_MINUTES || 10
       } minutes.</p><p>Reason for extra verification: ${finalRisk.reasons.join('; ')}</p>`,
     });
+
+    loginAttemptsTotal.inc({ outcome: 'mfa_required', risk_level: finalRisk.level });
+    loginRiskScore.observe(finalRisk.score);
 
     return res.status(200).json({
       message: 'A verification code has been sent to your email. Enter it to complete sign-in.',
@@ -411,8 +467,11 @@ async function verifyMfa(req, res, next) {
       await otpDoc.loginActivity.save();
     }
 
+    loginVerificationTotal.inc({ outcome: 'success' });
+
     const token = generateAuthToken(user._id);
     setAuthCookie(res, token);
+    await issueRefreshToken(res, user._id, { req });
 
     return res.json({
       message: 'Verification successful, login complete.',
@@ -546,8 +605,43 @@ async function verifyAdminSignup(req, res, next) {
 
 // @route POST /api/auth/logout
 async function logout(req, res) {
-  res.clearCookie(COOKIE_NAME);
+  const rawToken = getRefreshToken(req);
+  if (rawToken) {
+    const tokenHash = require('crypto').createHash('sha256').update(rawToken).digest('hex');
+    await RefreshToken.updateOne({ tokenHash }, { revoked: true, revokedAt: new Date() }).exec();
+  }
+  clearAuthCookies(res);
   res.json({ message: 'Logged out' });
+}
+
+// @route POST /api/auth/refresh
+// Rotates the refresh token: revokes the current one and issues a fresh
+// short-lived access token + a new refresh token.
+async function refresh(req, res, next) {
+  try {
+    const rawToken = getRefreshToken(req);
+    if (!rawToken) {
+      return res.status(401).json({ message: 'Refresh token missing' });
+    }
+
+    const token = await RefreshToken.consume(rawToken);
+    if (!token) {
+      return res.status(401).json({ message: 'Invalid, expired, or revoked refresh token' });
+    }
+
+    const user = await User.findById(token.user);
+    if (!user) {
+      return res.status(401).json({ message: 'User no longer exists' });
+    }
+
+    const accessToken = generateAuthToken(user._id);
+    setAuthCookie(res, accessToken);
+    await issueRefreshToken(res, user._id, { req });
+
+    res.json({ token: accessToken, user: user.toSafeObject() });
+  } catch (err) {
+    next(err);
+  }
 }
 
 // @route GET /api/auth/me
@@ -555,4 +649,16 @@ async function me(req, res) {
   res.json({ user: req.user.toSafeObject() });
 }
 
-module.exports = { register, verifySignup, verifyEmail, resendVerification, login, verifyMfa, adminSignup, verifyAdminSignup, logout, me };
+module.exports = {
+  register,
+  verifySignup,
+  verifyEmail,
+  resendVerification,
+  login,
+  verifyMfa,
+  adminSignup,
+  verifyAdminSignup,
+  refresh,
+  logout,
+  me,
+};
