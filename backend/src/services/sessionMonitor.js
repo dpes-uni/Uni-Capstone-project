@@ -23,16 +23,23 @@ function getRequestToken(req) {
 
 /**
  * Get the session key for an authenticated request.
+ *
+ * Priority: userId (stable across access-token refresh/rotation)
+ *           > token hash (fallback for unauthenticated requests)
+ *
+ * Using the userId as the primary key means a session's risk state
+ * survives access-token rotation via /auth/refresh. The token hash
+ * is only used as a fallback when req.user is not yet available
+ * (e.g. before JWT middleware has populated it).
  */
 function getSessionKey(req) {
-  const token = getRequestToken(req);
-
-  if (token) {
-    return hashToken(token);
-  }
-
   if (req?.user?._id) {
     return `user:${req.user._id}`;
+  }
+
+  const token = getRequestToken(req);
+  if (token) {
+    return hashToken(token);
   }
 
   return null;
@@ -395,6 +402,7 @@ function clearSession(req) {
 
 
 module.exports = {
+  sessions,
   recordSessionEvent,
   clearSession,
   clearSessionReauthentication,

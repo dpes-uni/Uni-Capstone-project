@@ -1,4 +1,4 @@
-code .\backend\src\controllers\authController.jsconst bcrypt = require('bcryptjs');
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const LoginActivity = require('../models/LoginActivity');
 const OtpToken = require('../models/OtpToken');
