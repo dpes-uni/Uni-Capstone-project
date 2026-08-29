@@ -7,6 +7,10 @@ const { sendEmail } = require('../utils/sendEmail');
 const { generateOtp, hashOtp } = require('../utils/otp');
 const logger = require('../utils/logger');
 const {
+  getSessionStatus,
+  clearSessionReauthentication,
+} = require('../services/sessionMonitor');
+const {
   generateAuthToken,
   generateRandomToken,
   hashToken,
@@ -424,6 +428,104 @@ async function verifyMfa(req, res, next) {
   }
 }
 
+async function requestReauthentication(req, res, next) {
+  try {
+    const sessionStatus = getSessionStatus(req);
+
+    if (!sessionStatus?.requiresReauthentication) {
+      return res.status(400).json({
+        message: 'Re-authentication is not required for this session.',
+      });
+    }
+
+    const code = generateOtp();
+
+    await OtpToken.updateMany(
+      { user: req.user._id, purpose: 'reauth', consumed: false },
+      { $set: { consumed: true } }
+    );
+
+    const otpDoc = await OtpToken.create({
+      user: req.user._id,
+      email: req.user.email,
+      name: req.user.name,
+      purpose: 'reauth',
+      codeHash: hashOtp(code),
+      expiresAt: new Date(Date.now() + Number(process.env.OTP_EXPIRES_MINUTES || 10) * 60000),
+      ip: getClientIp(req),
+      userAgent: req.headers['user-agent'] || 'unknown',
+    });
+
+    const { delivered } = await sendEmail({
+      to: req.user.email,
+      subject: 'Your Assure Docs re-authentication code',
+      text: `Your one-time passcode is ${code}. It expires in ${
+        process.env.OTP_EXPIRES_MINUTES || 10
+      } minutes.`,
+      html: `<p>Your one-time passcode is <strong>${code}</strong>.</p><p>It expires in ${
+        process.env.OTP_EXPIRES_MINUTES || 10
+      } minutes.</p>`,
+    });
+
+    return res.status(200).json({
+      message: delivered
+        ? 'A re-authentication code has been sent to your email.'
+        : 'SMTP is not configured. In development, the OTP is available below.',
+      reauthId: otpDoc._id,
+      ...(delivered ? {} : { devOtpCode: code }),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function verifyReauthentication(req, res, next) {
+  try {
+    const { reauthId, code } = req.body;
+    const sessionStatus = getSessionStatus(req);
+
+    if (!sessionStatus?.requiresReauthentication) {
+      return res.status(400).json({
+        message: 'Re-authentication is not required for this session.',
+      });
+    }
+
+    const otpDoc = await OtpToken.findOne({
+      _id: reauthId,
+      user: req.user._id,
+      purpose: 'reauth',
+      consumed: false,
+    });
+
+    if (!otpDoc || otpDoc.expiresAt < new Date()) {
+      return res.status(400).json({ message: 'This code is invalid or has expired. Please try again.' });
+    }
+
+    if (otpDoc.attempts >= otpDoc.maxAttempts) {
+      return res.status(429).json({ message: 'Too many incorrect attempts. Please request a new code.' });
+    }
+
+    if (hashOtp(String(code || '')) !== otpDoc.codeHash) {
+      otpDoc.attempts += 1;
+      await otpDoc.save();
+      return res.status(400).json({ message: 'Incorrect code, please try again.' });
+    }
+
+    otpDoc.consumed = true;
+    await otpDoc.save();
+
+    clearSessionReauthentication(req);
+
+    return res.json({
+      message: 'Re-authentication successful. Session restored.',
+      reauthenticationRequired: false,
+      user: req.user.toSafeObject(),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 
 // @route POST /api/auth/admin-signup
 // Creates a pending admin signup and emails a 6-digit OTP.
@@ -555,4 +657,4 @@ async function me(req, res) {
   res.json({ user: req.user.toSafeObject() });
 }
 
-module.exports = { register, verifySignup, verifyEmail, resendVerification, login, verifyMfa, adminSignup, verifyAdminSignup, logout, me };
+module.exports = { register, verifySignup, verifyEmail, resendVerification, login, verifyMfa, requestReauthentication, verifyReauthentication, adminSignup, verifyAdminSignup, logout, me };

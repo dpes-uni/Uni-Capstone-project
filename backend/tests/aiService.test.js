@@ -81,7 +81,7 @@ describe('AiService', () => {
   describe('assessRisk', () => {
     test('POSTs the login attempt to /predict and returns the result', async () => {
       const payload = { username: 'demo@assuredocs.test', new_device: true };
-      axios.post.mockResolvedValue({ data: { risk_score: 55, risk_level: 'medium', reason: 'x' } });
+      axios.post.mockResolvedValue({ data: { risk_score: 55, risk_level: 'medium', recommended_action: 'Require Email OTP', reason: 'x' } });
 
       const result = await aiService.assessRisk(payload);
       expect(axios.post).toHaveBeenCalledWith(

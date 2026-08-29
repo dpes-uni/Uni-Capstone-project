@@ -2,6 +2,19 @@ const path = require('path');
 const fs = require('fs');
 const Assessment = require('../models/Assessment');
 const { UPLOAD_DIR } = require('../middleware/upload');
+const logger = require('../utils/logger');
+const { recordSessionEvent } = require('../services/sessionMonitor');
+
+async function recordSessionEventSafely(req, eventType) {
+  try {
+    await recordSessionEvent(req, eventType);
+  } catch (err) {
+    logger.warn('Session event recording failed', {
+      eventType,
+      error: err.message,
+    });
+  }
+}
 
 // @route GET /api/assessments
 async function listAssessments(req, res, next) {
@@ -57,12 +70,21 @@ async function updateAssessment(req, res, next) {
   try {
     const { status, notes } = req.body;
     const assessment = await Assessment.findOne({ _id: req.params.id, owner: req.user._id });
-    if (!assessment) return res.status(404).json({ message: 'Assessment not found' });
+    if (!assessment) {
+      await recordSessionEventSafely(req, 'failed_action');
+      return res.status(404).json({ message: 'Assessment not found' });
+    }
 
     if (status) assessment.status = status;
     if (notes !== undefined) assessment.notes = notes;
 
     await assessment.save();
+
+    await recordSessionEventSafely(
+      req,
+      'verification_action'
+    );
+
     res.json({ message: 'Assessment updated', assessment });
   } catch (err) {
     next(err);
@@ -115,6 +137,12 @@ async function uploadDocument(req, res, next) {
     assessment.reviewedAt = undefined;
 
     await assessment.save();
+
+    await recordSessionEventSafely(
+      req,
+      'document_uploaded'
+    );
+
     res.json({ message: 'Document uploaded', assessment });
   } catch (err) {
     next(err);
@@ -137,6 +165,14 @@ async function getOwnDocument(req, res, next) {
 
     res.setHeader('Content-Type', assessment.documentFile.mimeType || 'application/octet-stream');
     res.setHeader('Content-Disposition', `inline; filename="${assessment.documentFile.originalName}"`);
+
+    res.once('finish', () => {
+      void recordSessionEventSafely(
+        req,
+        'document_viewed'
+      );
+    });
+
     fs.createReadStream(filePath).pipe(res);
   } catch (err) {
     next(err);

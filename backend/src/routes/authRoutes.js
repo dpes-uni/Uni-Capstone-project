@@ -1,7 +1,10 @@
 const express = require('express');
 const { body } = require('express-validator');
 const validate = require('../middleware/validate');
-const { protect } = require('../middleware/auth');
+const {
+  protect,
+  authenticateSession,
+} = require('../middleware/auth');
 const {
   register,
   verifySignup,
@@ -9,6 +12,8 @@ const {
   resendVerification,
   login,
   verifyMfa,
+  requestReauthentication,
+  verifyReauthentication,
   adminSignup,
   verifyAdminSignup,
   logout,
@@ -69,6 +74,19 @@ router.post(
   ],
   validate,
   verifyMfa
+);
+
+router.post('/reauth/request', authenticateSession, requestReauthentication);
+
+router.post(
+  '/reauth/verify',
+  [
+    authenticateSession,
+    body('reauthId').isMongoId().withMessage('reauthId is required'),
+    body('code').isLength({ min: 6, max: 6 }).withMessage('Code must be 6 digits'),
+  ],
+  validate,
+  verifyReauthentication
 );
 
 router.post(

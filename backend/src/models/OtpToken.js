@@ -11,7 +11,7 @@ const otpTokenSchema = new mongoose.Schema(
     role: { type: String, enum: ['student', 'agent', 'institution'], default: 'student' },
     passwordHash: { type: String, select: false },
     codeHash: { type: String, required: true },
-    purpose: { type: String, enum: ['login_mfa', 'signup', 'admin_signup'], default: 'login_mfa' },
+    purpose: { type: String, enum: ['login_mfa', 'reauth', 'signup', 'admin_signup'], default: 'login_mfa' },
     adminOnly: { type: Boolean, default: false },
     attempts: { type: Number, default: 0 },
     maxAttempts: { type: Number, default: 5 },

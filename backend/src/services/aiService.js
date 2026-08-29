@@ -3,152 +3,698 @@ const { getIpGeolocation } = require('./ipService');
 const logger = require('../utils/logger');
 
 /**
- * Service for communicating with the Python AI anomaly detection service.
+ * The Python service performs risk assessment.
+ * The Node.js backend is responsible for enforcing
+ * authentication and re-authentication decisions.
  */
 class AiService {
   constructor() {
-    this.baseUrl = process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000';
-    this.timeout = 5000; // 5 seconds timeout
+    this.baseUrl =
+      process.env.AI_SERVICE_URL ||
+      'http://127.0.0.1:8000';
+
+    this.timeout = 5000;
   }
 
+
+  // ========================================================
+  // DEVICE INFORMATION
+  // ========================================================
+
   /**
-   * Extract device information from request headers.
-   * @param {Object} req - Express request object
+   * Extract basic device, browser and operating-system
+   * information from the request User-Agent.
+   *
+   * @param {Object} req Express request object
    * @returns {Object} Device information
    */
   extractDeviceInfo(req) {
-    const userAgent = req.headers['user-agent'] || 'unknown';
+    const userAgent =
+      req?.headers?.['user-agent'] ||
+      'unknown';
 
-    // Simple device/browser/OS detection
     let device = 'Unknown';
     let browser = 'Unknown';
     let operatingSystem = 'Unknown';
 
-    // Detect operating system
+
+    // ------------------------------------------------------
+    // Operating system
+    // ------------------------------------------------------
+
     if (/windows/i.test(userAgent)) {
       operatingSystem = 'Windows';
-    } else if (/macintosh|mac os x/i.test(userAgent)) {
+    } else if (
+      /macintosh|mac os x/i.test(userAgent)
+    ) {
       operatingSystem = 'MacOS';
-    } else if (/linux/i.test(userAgent)) {
-      operatingSystem = 'Linux';
     } else if (/android/i.test(userAgent)) {
       operatingSystem = 'Android';
-    } else if (/ios|iphone|ipad|ipod/i.test(userAgent)) {
+    } else if (
+      /iphone|ipad|ipod|ios/i.test(userAgent)
+    ) {
       operatingSystem = 'iOS';
+    } else if (/linux/i.test(userAgent)) {
+      operatingSystem = 'Linux';
     }
 
-    // Detect browser
+
+    // ------------------------------------------------------
+    // Browser
+    // ------------------------------------------------------
+
     if (/edg/i.test(userAgent)) {
       browser = 'Edge';
     } else if (/opr\//i.test(userAgent)) {
       browser = 'Opera';
-    } else if (/chrome|crios/i.test(userAgent)) {
+    } else if (
+      /chrome|crios/i.test(userAgent)
+    ) {
       browser = 'Chrome';
+    } else if (
+      /firefox|fxios/i.test(userAgent)
+    ) {
+      browser = 'Firefox';
     } else if (/safari/i.test(userAgent)) {
       browser = 'Safari';
-    } else if (/firefox|fxios/i.test(userAgent)) {
-      browser = 'Firefox';
     }
 
-    // Detect device type
-    if (/mobile|android|iphone|ipad|ipod/i.test(userAgent)) {
-      device = 'Mobile';
-    } else if (/tablet|ipad|playbook|silk/i.test(userAgent)) {
+
+    // ------------------------------------------------------
+    // Device type
+    // ------------------------------------------------------
+
+    if (
+      /tablet|ipad|playbook|silk/i.test(
+        userAgent
+      )
+    ) {
       device = 'Tablet';
+    } else if (
+      /mobile|android|iphone|ipod/i.test(
+        userAgent
+      )
+    ) {
+      device = 'Mobile';
     } else {
       device = 'Desktop';
     }
 
-    return { device, browser, operatingSystem };
-  }
-
-  /**
-   * Convert backend login data to AI service LoginAttempt format.
-   * @param {Object} user - User object from database
-   * @param {string} deviceHash - Device fingerprint hash
-   * @param {string} ip - IP address
-   * @param {string} userAgent - User agent string
-   * @param {Object} req - Express request object
-   * @param {number} failedLoginAttempts - User's failed login attempts count
-   * @returns {Promise<Object>} LoginAttempt data for AI service
-   */
-  async buildLoginAttempt(user, deviceHash, ip, userAgent, req, failedLoginAttempts = 0) {
-    // Extract device information
-    const { device, browser, operatingSystem } = this.extractDeviceInfo(req);
-
-    // Get geolocation data
-    const { country, city } = await getIpGeolocation(ip);
-
-    // Determine if this is a new device
-    const isNewDevice = !user.trustedDevices.some(d => d.deviceHash === deviceHash);
-
-    // Determine if this is a trusted device (simplified)
-    const isTrustedDevice = !isNewDevice; // In a real system, this might be more complex
-
-    // Determine if this is a trusted location (simplified - would need to store user's trusted locations)
-    const isTrustedLocation = false; // Placeholder - would need implementation
-
-    // Determine if VPN is detected (simplified)
-    const isVpnDetected = false; // Placeholder - would need VPN detection service
-
-    // Get login hour
-    const loginHour = new Date().getHours();
 
     return {
-      username: user.email,
       device,
       browser,
-      operating_system: operatingSystem,
-      ip_address: ip,
-      country,
-      city,
-      login_hour: loginHour,
-      failed_login_attempts: failedLoginAttempts,
-      new_device: isNewDevice,
-      vpn_detected: isVpnDetected,
-      trusted_device: isTrustedDevice,
-      trusted_location: isTrustedLocation,
+      operatingSystem,
     };
   }
 
+
+  // ========================================================
+  // LOGIN AI
+  // ========================================================
+
   /**
-   * Call the AI service to get risk assessment for a login attempt.
-   * @param {Object} loginAttemptData - Login attempt data in AI service format
-   * @returns {Promise<Object>} Risk assessment result
+   * Build the LoginAttempt payload expected by Python.
+   *
+   * @param {Object} user User document
+   * @param {string} deviceHash Device fingerprint
+   * @param {string} ip Client IP
+   * @param {string} userAgent User-Agent
+   * @param {Object} req Express request
+   * @param {number} failedLoginAttempts Failed login attempts
+   * @returns {Promise<Object>} LoginAttempt payload
+   */
+  async buildLoginAttempt(
+    user,
+    deviceHash,
+    ip,
+    userAgent,
+    req,
+    failedLoginAttempts = 0
+  ) {
+    if (!user) {
+      throw new Error(
+        'User is required to build a login attempt'
+      );
+    }
+
+    if (!req) {
+      throw new Error(
+        'Request is required to build a login attempt'
+      );
+    }
+
+    const {
+      device,
+      browser,
+      operatingSystem,
+    } = this.extractDeviceInfo(req);
+
+
+    // ------------------------------------------------------
+    // IP geolocation
+    // ------------------------------------------------------
+
+    const {
+      country,
+      city,
+    } = await getIpGeolocation(ip);
+
+
+    // ------------------------------------------------------
+    // Trusted device
+    // ------------------------------------------------------
+
+    const trustedDevices =
+      Array.isArray(user.trustedDevices)
+        ? user.trustedDevices
+        : [];
+
+    const isNewDevice =
+      !trustedDevices.some(
+        (entry) =>
+          entry.deviceHash === deviceHash
+      );
+
+    const isTrustedDevice =
+      !isNewDevice;
+
+
+    // ------------------------------------------------------
+    // Current implementation limitations
+    // ------------------------------------------------------
+    //
+    // The repository currently does not provide a dedicated
+    // trusted-location store or VPN detection mechanism.
+    //
+    // Therefore these values are deliberately not fabricated.
+    //
+    // These can be improved later without changing the
+    // Node -> Python interface.
+    //
+
+    const isTrustedLocation = false;
+    const isVpnDetected = false;
+
+
+    // ------------------------------------------------------
+    // Login hour
+    // ------------------------------------------------------
+
+    const loginHour =
+      new Date().getHours();
+
+
+    return {
+      username: user.email,
+
+      device,
+
+      browser,
+
+      operating_system:
+        operatingSystem,
+
+      ip_address:
+        ip,
+
+      country,
+
+      city,
+
+      login_hour:
+        loginHour,
+
+      failed_login_attempts:
+        Number(failedLoginAttempts),
+
+      new_device:
+        Boolean(isNewDevice),
+
+      vpn_detected:
+        Boolean(isVpnDetected),
+
+      trusted_device:
+        Boolean(isTrustedDevice),
+
+      trusted_location:
+        Boolean(isTrustedLocation),
+    };
+  }
+
+
+  /**
+   * Call Python Login Risk AI.
+   *
+   * Endpoint:
+   *   POST /predict
+   *
+   * @param {Object} loginAttemptData LoginAttempt payload
+   * @returns {Promise<Object>} Python RiskResult
    */
   async assessRisk(loginAttemptData) {
-    try {
-      const response = await axios.post(`${this.baseUrl}/predict`, loginAttemptData, {
-        timeout: this.timeout,
-        family: 4, // prefer IPv4 (Flask dev server binds IPv4 only; avoids ::1 flakiness)
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+    if (
+      !loginAttemptData ||
+      typeof loginAttemptData !== 'object'
+    ) {
+      throw new Error(
+        'Invalid login AI request data'
+      );
+    }
 
-      return response.data;
+    try {
+      const response =
+        await axios.post(
+          `${this.baseUrl}/predict`,
+          loginAttemptData,
+          {
+            timeout:
+              this.timeout,
+
+            // Flask is currently bound to IPv4.
+            family: 4,
+
+            headers: {
+              'Content-Type':
+                'application/json',
+            },
+          }
+        );
+
+
+      const result =
+        response.data;
+
+
+      this.validateRiskResult(
+        result,
+        'login'
+      );
+
+
+      return result;
+
     } catch (error) {
-      logger.error('AI service call failed', { error: error.message });
-      // Throw error to be handled by caller
-      throw new Error(`AI service unavailable: ${error.message}`);
+      logger.error(
+        'AI login risk service call failed',
+        {
+          error:
+            error.message,
+        }
+      );
+
+      throw new Error(
+        `AI service unavailable: ${error.message}`
+      );
     }
   }
 
+
+  // ========================================================
+  // ACTIVE SESSION AI
+  // ========================================================
+
   /**
-   * Check if AI service is healthy.
-   * @returns {Promise<boolean>} True if service is healthy
+   * Build the SessionEvent payload expected by Python.
+   *
+   * Expected Python fields:
+   *
+   *   username
+   *   user_role
+   *   session_duration_minutes
+   *   documents_viewed
+   *   documents_downloaded
+   *   documents_uploaded
+   *   verification_actions
+   *   failed_actions
+   *   rapid_actions
+   *   unusual_activity
+   *
+   * IMPORTANT:
+   *
+   * The live Node.js backend should collect behavioural
+   * features. It should not independently decide whether
+   * behaviour is unusual.
+   *
+   * `unusual_activity` therefore remains optional and
+   * defaults to false only for compatibility with the
+   * current Python SessionEvent contract and existing
+   * prediction endpoint.
+   *
+   * @param {Object} sessionData Session activity data
+   * @returns {Object} SessionEvent payload
+   */
+  buildSessionEvent(sessionData = {}) {
+    if (
+      !sessionData ||
+      typeof sessionData !== 'object'
+    ) {
+      throw new Error(
+        'Invalid session data'
+      );
+    }
+
+
+    const {
+      username,
+      userRole,
+
+      sessionDurationMinutes,
+
+      documentsViewed,
+      documentsDownloaded,
+      documentsUploaded,
+      verificationActions,
+
+      failedActions,
+      rapidActions,
+
+      unusualActivity,
+    } = sessionData;
+
+
+    // ------------------------------------------------------
+    // Required identity information
+    // ------------------------------------------------------
+
+    if (
+      typeof username !== 'string' ||
+      username.trim().length === 0
+    ) {
+      throw new Error(
+        'Session username is required'
+      );
+    }
+
+
+    if (
+      typeof userRole !== 'string' ||
+      userRole.trim().length === 0
+    ) {
+      throw new Error(
+        'Session user role is required'
+      );
+    }
+
+
+    // ------------------------------------------------------
+    // Numeric feature validation
+    // ------------------------------------------------------
+
+    const numericFields = {
+      sessionDurationMinutes,
+      documentsViewed,
+      documentsDownloaded,
+      documentsUploaded,
+      verificationActions,
+      failedActions,
+    };
+
+
+    for (
+      const [field, value]
+      of Object.entries(numericFields)
+    ) {
+      if (
+        value === undefined ||
+        value === null ||
+        !Number.isFinite(
+          Number(value)
+        ) ||
+        Number(value) < 0
+      ) {
+        throw new Error(
+          `${field} must be a non-negative number`
+        );
+      }
+    }
+
+
+    // ------------------------------------------------------
+    // Boolean feature validation
+    // ------------------------------------------------------
+
+    if (
+      rapidActions !== undefined &&
+      typeof rapidActions !== 'boolean'
+    ) {
+      throw new Error(
+        'rapidActions must be a boolean'
+      );
+    }
+
+
+    if (
+      unusualActivity !== undefined &&
+      typeof unusualActivity !== 'boolean'
+    ) {
+      throw new Error(
+        'unusualActivity must be a boolean'
+      );
+    }
+
+
+    // ------------------------------------------------------
+    // Build Python-compatible payload
+    // ------------------------------------------------------
+
+    return {
+      username:
+        username.trim(),
+
+      user_role:
+        userRole.trim(),
+
+      session_duration_minutes:
+        Number(
+          sessionDurationMinutes
+        ),
+
+      documents_viewed:
+        Number(
+          documentsViewed
+        ),
+
+      documents_downloaded:
+        Number(
+          documentsDownloaded
+        ),
+
+      documents_uploaded:
+        Number(
+          documentsUploaded
+        ),
+
+      verification_actions:
+        Number(
+          verificationActions
+        ),
+
+      failed_actions:
+        Number(
+          failedActions
+        ),
+
+      rapid_actions:
+        rapidActions === true,
+
+      // Compatibility with the current Python
+      // SessionEvent contract.
+      //
+      // The live backend should not calculate this value.
+      unusual_activity:
+        unusualActivity === true,
+    };
+  }
+
+
+  /**
+   * Call Python Session Monitoring AI.
+   *
+   * Endpoint:
+   *   POST /predict-session
+   *
+   * @param {Object} sessionData Session activity data
+   * @returns {Promise<Object>} Python RiskResult
+   */
+  async assessSessionRisk(sessionData) {
+    const sessionEvent =
+      this.buildSessionEvent(
+        sessionData
+      );
+
+
+    try {
+      const response =
+        await axios.post(
+          `${this.baseUrl}/predict-session`,
+          sessionEvent,
+          {
+            timeout:
+              this.timeout,
+
+            // Flask is currently bound to IPv4.
+            family: 4,
+
+            headers: {
+              'Content-Type':
+                'application/json',
+            },
+          }
+        );
+
+
+      const result =
+        response.data;
+
+
+      this.validateRiskResult(
+        result,
+        'session'
+      );
+
+
+      return result;
+
+    } catch (error) {
+      logger.error(
+        'AI session risk service call failed',
+        {
+          error:
+            error.message,
+        }
+      );
+
+      throw new Error(
+        `AI session service unavailable: ${error.message}`
+      );
+    }
+  }
+
+
+  // ========================================================
+  // RISK RESULT VALIDATION
+  // ========================================================
+
+  /**
+   * Validate the common RiskResult returned by Python.
+   *
+   * Expected structure:
+   *
+   * {
+   *   risk_score: number,
+   *   risk_level: string,
+   *   recommended_action: string,
+   *   reason: string
+   * }
+   *
+   * @param {Object} result Python response
+   * @param {string} source login/session
+   */
+  validateRiskResult(
+    result,
+    source
+  ) {
+    if (
+      !result ||
+      typeof result !== 'object'
+    ) {
+      throw new Error(
+        `Invalid ${source} AI response`
+      );
+    }
+
+
+    if (
+      !Number.isFinite(
+        Number(result.risk_score)
+      )
+    ) {
+      throw new Error(
+        `Invalid ${source} AI risk score`
+      );
+    }
+
+
+    if (
+      typeof result.risk_level !==
+      'string' ||
+      result.risk_level.trim()
+        .length === 0
+    ) {
+      throw new Error(
+        `Invalid ${source} AI risk level`
+      );
+    }
+
+
+    if (
+      typeof result.recommended_action !==
+      'string' ||
+      result.recommended_action
+        .trim()
+        .length === 0
+    ) {
+      throw new Error(
+        `Invalid ${source} AI recommended action`
+      );
+    }
+
+
+    if (
+      typeof result.reason !==
+      'string'
+    ) {
+      throw new Error(
+        `Invalid ${source} AI reason`
+      );
+    }
+  }
+
+
+  // ========================================================
+  // AI HEALTH CHECK
+  // ========================================================
+
+  /**
+   * Check whether the Python AI service is healthy.
+   *
+   * Endpoint:
+   *   GET /health
+   *
+   * @returns {Promise<boolean>} Service health status
    */
   async isHealthy() {
     try {
-      const response = await axios.get(`${this.baseUrl}/health`, {
-        timeout: this.timeout,
-        family: 4, // prefer IPv4 (Flask dev server binds IPv4 only)
-      });
-      return response.data.status === 'healthy';
+      const response =
+        await axios.get(
+          `${this.baseUrl}/health`,
+          {
+            timeout:
+              this.timeout,
+
+            // Flask is currently bound to IPv4.
+            family: 4,
+          }
+        );
+
+
+      return (
+        response.data &&
+        response.data.status ===
+          'healthy'
+      );
+
     } catch (error) {
       return false;
     }
   }
 }
 
-module.exports = new AiService();
+
+// ==========================================================
+// SINGLE SERVICE INSTANCE
+// ==========================================================
+
+module.exports =
+  new AiService();
