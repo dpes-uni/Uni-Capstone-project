@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import api from '../api/axios.js';
+import api, { refreshAccessToken } from '../api/axios.js';
+import { isExpired } from '../utils/token.js';
 
 const AuthContext = createContext(null);
 
@@ -13,10 +14,29 @@ export function AuthProvider({ children }) {
       setLoading(false);
       return;
     }
+
+    // If the access token already expired, trade the refresh cookie for a fresh one first.
+    if (isExpired(token)) {
+      try {
+        const newToken = await refreshAccessToken();
+        if (!newToken) {
+          localStorage.removeItem('ad_token');
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+      } catch {
+        localStorage.removeItem('ad_token');
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+    }
+
     try {
       const { data } = await api.get('/auth/me');
       setUser(data.user);
-    } catch (err) {
+    } catch {
       localStorage.removeItem('ad_token');
       setUser(null);
     } finally {

@@ -9,7 +9,7 @@ const ipCache = new NodeCache({ stdTTL: 3600, checkperiod: 600 });
  * Get geolocation data for an IP address.
  * Uses ipapi.co free API with caching.
  * @param {string} ip - IP address
- * @returns {Promise<{country: string, city: string}>}
+ * @returns {Promise<{country: string, city: string, latitude: number|null, longitude: number|null}>}
  */
 async function getIpGeolocation(ip) {
   // Return cached data if available
@@ -19,7 +19,7 @@ async function getIpGeolocation(ip) {
   }
 
   // Default values if lookup fails
-  const defaultData = { country: 'Unknown', city: 'Unknown' };
+  const defaultData = { country: 'Unknown', city: 'Unknown', latitude: null, longitude: null };
 
   // Skip lookup for reserved/IPs
   if (!ip || ip === 'unknown' || ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.16.') || ip.startsWith('127.')) {
@@ -35,6 +35,8 @@ async function getIpGeolocation(ip) {
     const data = {
       country: response.data.country_name || 'Unknown',
       city: response.data.city || 'Unknown',
+      latitude: response.data.latitude || null,
+      longitude: response.data.longitude || null,
     };
 
     // Cache the result

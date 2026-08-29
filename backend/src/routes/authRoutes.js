@@ -16,6 +16,7 @@ const {
   verifyReauthentication,
   adminSignup,
   verifyAdminSignup,
+  refresh,
   logout,
   me,
 } = require('../controllers/authController');
@@ -112,6 +113,7 @@ router.post(
 );
 
 router.post('/logout', logout);
+router.post('/refresh', refresh);
 router.get('/me', protect, me);
 
 module.exports = router;

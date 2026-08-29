@@ -11,6 +11,7 @@ const assessmentRoutes = require('./routes/assessmentRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const logger = require('./utils/logger');
+const metrics = require('./utils/metrics');
 
 const app = express();
 
@@ -48,6 +49,9 @@ if (process.env.NODE_ENV !== 'test') {
     )
   );
 }
+
+// Prometheus metrics: request-duration histogram for non-health routes.
+app.use((req, res, next) => metrics.recordHttpRequest(req, res, next));
 
 // --- rate limiting for auth endpoints (brute force protection) ---
 const authLimiter = rateLimit({
@@ -106,11 +110,38 @@ app.get('/api/health/ready', async (req, res) => {
   return res.json({ status: 'ready', database: { state: 'connected' } });
 });
 
+// --- prometheus metrics ---
+app.get('/api/metrics', async (req, res) => {
+  res.set('Content-Type', metrics.client.register.contentType);
+  res.end(await metrics.client.register.metrics());
+});
+
 // --- routes ---
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/assessments', assessmentRoutes);
 app.use('/api/admin', adminRoutes);
+
+// --- optional: serve the built React SPA from the backend in production ---
+// Enable with SERVE_FRONTEND=true and point FRONTEND_DIST at the build output
+// (defaults to ../frontend/dist relative to this file).
+if (process.env.SERVE_FRONTEND === 'true') {
+  const path = require('path');
+  const fs = require('fs');
+  const dist = process.env.FRONTEND_DIST || path.join(__dirname, '..', '..', 'frontend', 'dist');
+
+  if (fs.existsSync(dist)) {
+    app.use(express.static(dist));
+    // All non-API routes return index.html for client-side routing.
+    app.use((req, res) => {
+      if (req.path.startsWith('/api/')) return notFound(req, res);
+      res.sendFile(path.join(dist, 'index.html'));
+    });
+    logger.info(`Serving frontend from ${dist}`);
+  } else {
+    logger.warn(`SERVE_FRONTEND is enabled but ${dist} does not exist. Run 'npm run build' in the frontend first.`);
+  }
+}
 
 // --- 404 + error handling ---
 app.use(notFound);
