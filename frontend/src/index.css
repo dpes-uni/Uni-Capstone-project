@@ -98,6 +98,59 @@ a { text-decoration: none; color: inherit; }
 .btn-sm { padding: 6px 12px; font-size: 13px; }
 .btn-block { width: 100%; margin-top: 8px; }
 
+/* ===== Re-auth modal ===== */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+.modal-card {
+  background: var(--white);
+  border-radius: 14px;
+  padding: 28px;
+  width: 100%;
+  max-width: 420px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+}
+.modal-card h2 { color: var(--primary); margin-bottom: 8px; font-size: 22px; }
+.modal-subtitle { color: var(--gray); font-size: 14px; margin-bottom: 16px; }
+.modal-card label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--primary);
+}
+.modal-card input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 16px;
+  letter-spacing: 4px;
+  text-align: center;
+}
+.modal-dev-otp {
+  background: var(--gray-light);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  margin-bottom: 16px;
+  color: var(--primary);
+}
+.modal-error { color: #dc2626; font-size: 13px; margin: 10px 0; }
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
 /* ===== Page layout ===== */
 .page { max-width: 1080px; margin: 0 auto; padding: 48px 24px 80px; }
 .page-header { text-align: center; margin-bottom: 40px; }

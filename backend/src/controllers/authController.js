@@ -11,6 +11,7 @@ const { loginAttemptsTotal, loginRiskScore, loginVerificationTotal } = require('
 const {
   getSessionStatus,
   clearSessionReauthentication,
+  clearSessionByUserId,
 } = require('../services/sessionMonitor');
 const {
   generateAuthToken,
@@ -461,6 +462,10 @@ async function verifyMfa(req, res, next) {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    // A brand-new authenticated session must start clean: drop any stale
+    // "requires re-authentication" flag left over from a previous session.
+    clearSessionByUserId(user._id);
+
     user.trustedDevices.push({ deviceHash: otpDoc.deviceHash, userAgent: otpDoc.userAgent, ip: otpDoc.ip });
     user.lastLoginAt = new Date();
     await user.save();
@@ -710,6 +715,10 @@ async function logout(req, res) {
   const rawToken = getRefreshToken(req);
   if (rawToken) {
     const tokenHash = require('crypto').createHash('sha256').update(rawToken).digest('hex');
+    const refreshDoc = await RefreshToken.findOne({ tokenHash });
+    if (refreshDoc) {
+      clearSessionByUserId(refreshDoc.user);
+    }
     await RefreshToken.updateOne({ tokenHash }, { revoked: true, revokedAt: new Date() }).exec();
   }
   clearAuthCookies(res);

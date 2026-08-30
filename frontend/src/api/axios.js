@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { triggerReauth } from './reauth.js';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
@@ -39,6 +40,8 @@ async function refreshAccessToken() {
 }
 
 // On 401, try to refresh once and retry the failed request.
+// On 403 with `reauthenticationRequired`, prompt the user to re-authenticate
+// via the active session, then retry the original request.
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -55,6 +58,28 @@ api.interceptors.response.use(
         }
       } catch (refreshError) {
         localStorage.removeItem('ad_token');
+      }
+    }
+
+    if (
+      status === 403 &&
+      response?.data?.reauthenticationRequired &&
+      !config.__reauthRetry
+    ) {
+      config.__reauthRetry = true;
+      try {
+        await triggerReauth();
+        config.headers.Authorization = `Bearer ${localStorage.getItem('ad_token')}`;
+        return api(config);
+      } catch (reauthError) {
+        // User cancelled or re-authentication failed: force a logout.
+        try {
+          await api.post('/auth/logout');
+        } catch {
+          // ignore
+        }
+        localStorage.removeItem('ad_token');
+        window.dispatchEvent(new Event('ad:force-logout'));
       }
     }
 

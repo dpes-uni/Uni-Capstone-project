@@ -48,6 +48,16 @@ export function AuthProvider({ children }) {
     loadMe();
   }, [loadMe]);
 
+  // Triggered by the axios interceptor when the user cancels a required
+  // re-authentication. Terminates the session and clears local auth state.
+  useEffect(() => {
+    const onForceLogout = () => {
+      setUser(null);
+    };
+    window.addEventListener('ad:force-logout', onForceLogout);
+    return () => window.removeEventListener('ad:force-logout', onForceLogout);
+  }, []);
+
   const loginWithToken = (token, userData) => {
     localStorage.setItem('ad_token', token);
     setUser(userData);
