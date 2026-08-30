@@ -26,8 +26,16 @@ class Predictor:
 
     def __init__(self):
 
+        # Resolve relative to the project root (ai/) so the model loads
+        # regardless of the process working directory.
+        project_root = (
+            Path(__file__).resolve().parent.parent.parent
+        )
+
         model_path = (
-            Path("models/trained")
+            project_root
+            / "models"
+            / "trained"
             / settings.MODEL_FILENAME
         )
 

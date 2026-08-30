@@ -76,6 +76,16 @@ The Python service does NOT directly issue OTPs,
 create sessions, log users out, or modify authentication state.
 """
 
+import sys
+from pathlib import Path
+
+# Make the package root (this file's directory) importable so the service can
+# be launched from any working directory (e.g. `python src/api.py`) without
+# needing PYTHONPATH to be set manually.
+_SRC_DIR = Path(__file__).resolve().parent
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+
 from flask import Flask, jsonify, request
 import logging
 

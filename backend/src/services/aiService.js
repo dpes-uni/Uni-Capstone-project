@@ -1,5 +1,6 @@
 const axios = require('axios');
-const { getIpGeolocation } = require('./ipService');
+const { getIpGeolocation, detectVpn } = require('./ipService');
+const LoginActivity = require('../models/LoginActivity');
 const logger = require('../utils/logger');
 
 /**
@@ -158,6 +159,8 @@ class AiService {
     const {
       country,
       city,
+      org,
+      asn,
     } = await getIpGeolocation(ip);
 
 
@@ -181,20 +184,49 @@ class AiService {
 
 
     // ------------------------------------------------------
-    // Current implementation limitations
+    // VPN / proxy detection
+    //
+    // Best-effort heuristic based on the IP's owning
+    // organisation / ASN. Without a commercial VPN feed this
+    // is not definitive, but it surfaces the common anonymiser
+    // networks instead of always reporting false.
     // ------------------------------------------------------
-    //
-    // The repository currently does not provide a dedicated
-    // trusted-location store or VPN detection mechanism.
-    //
-    // Therefore these values are deliberately not fabricated.
-    //
-    // These can be improved later without changing the
-    // Node -> Python interface.
-    //
 
-    const isTrustedLocation = false;
-    const isVpnDetected = false;
+    const isVpnDetected = detectVpn({ org, asn });
+
+
+    // ------------------------------------------------------
+    // Trusted location
+    //
+    // A location is trusted when the user has successfully
+    // logged in from that country before. On first login there
+    // is no baseline, so we treat the location as trusted
+    // (the login still goes through MFA regardless).
+    // ------------------------------------------------------
+
+    let isTrustedLocation = true;
+
+    try {
+      const knownCountries = await LoginActivity.distinct(
+        'country',
+        {
+          user: user._id,
+          success: true,
+          mfaVerified: true,
+          country: { $nin: [null, 'Unknown'] },
+        }
+      );
+
+      if (knownCountries.length > 0) {
+        isTrustedLocation = knownCountries.includes(country);
+      }
+    } catch (historyError) {
+      logger.warn(
+        'trusted-location history lookup failed; defaulting to untrusted',
+        { error: historyError.message }
+      );
+      isTrustedLocation = false;
+    }
 
 
     // ------------------------------------------------------
