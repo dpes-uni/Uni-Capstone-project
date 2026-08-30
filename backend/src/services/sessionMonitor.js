@@ -400,11 +400,28 @@ function clearSession(req) {
   }
 }
 
+/**
+ * Remove a monitored session by user id directly.
+ *
+ * Used when a user completes a brand-new login or logs out, so that
+ * any stale "requires re-authentication" flag from a previous session
+ * does not survive into the new authenticated session.
+ */
+function clearSessionByUserId(userId) {
+  if (!userId) {
+    return false;
+  }
+
+  const key = `user:${userId}`;
+  return sessions.delete(key);
+}
+
 
 module.exports = {
   sessions,
   recordSessionEvent,
   clearSession,
+  clearSessionByUserId,
   clearSessionReauthentication,
   getSessionStatus,
   isSessionReauthenticationRequired: (req) =>

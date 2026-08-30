@@ -3,6 +3,7 @@ import { Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar.jsx';
 import Footer from './components/Footer.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
+import ReauthModal from './components/ReauthModal.jsx';
 
 import Home from './pages/Home.jsx';
 import Features from './pages/Features.jsx';
@@ -70,6 +71,7 @@ export default function App() {
         </Routes>
       </main>
       <Footer />
+      <ReauthModal />
     </div>
   );
 }
