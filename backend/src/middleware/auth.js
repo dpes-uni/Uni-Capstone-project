@@ -2,6 +2,9 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const {
   getSessionStatus,
+  consumeStepUpVerification,
+  clearStepUpVerification,
+  isSessionReauthenticationRequired,
 } = require('../services/sessionMonitor');
 
 function getRequestToken(req) {
@@ -79,4 +82,55 @@ async function protect(req, res, next) {
   }
 }
 
-module.exports = { protect, authenticateSession };
+// Middleware for sensitive actions that require step-up OTP verification.
+//
+// Runs AFTER `protect` (or any middleware that attaches req.user).
+// Enforces that a valid step-up OTP has been verified for this session,
+// regardless of whether the session risk is elevated.
+//
+// Returns 403 with:
+//   { reauthenticationRequired: true }  — risk-based reauth is pending; use that flow
+//   { stepUpRequired: true }          — step-up OTP needed
+//   { stepUpRequired: true, expired: true } — step-up existed but expired
+//
+// On success, consumes the step-up verification immediately so the same
+// verification cannot be replayed.
+function stepUpProtect(req, res, next) {
+  // Risk-based re-authentication takes precedence.
+  if (isSessionReauthenticationRequired(req)) {
+    return res.status(403).json({
+      message: 'Session requires re-authentication.',
+      reauthenticationRequired: true,
+      stepUpRequired: false,
+    });
+  }
+
+  const sessionStatus = getSessionStatus(req);
+
+  if (!sessionStatus?.stepUpVerified) {
+    return res.status(403).json({
+      message: 'Additional verification required for this action.',
+      stepUpRequired: true,
+      reauthenticationRequired: false,
+    });
+  }
+
+  const expiresAt = new Date(sessionStatus.stepUpVerified.expiresAt).getTime();
+  if (expiresAt <= Date.now()) {
+    // Expired — clear it so the next request triggers a fresh OTP challenge.
+    clearStepUpVerification(req);
+    return res.status(403).json({
+      message: 'Step-up verification has expired. Please verify again.',
+      stepUpRequired: true,
+      reauthenticationRequired: false,
+      expired: true,
+    });
+  }
+
+  // Valid, unexpired step-up verification. Consume it before allowing the action
+  // so that each sensitive operation requires its own fresh OTP.
+  consumeStepUpVerification(req);
+  return next();
+}
+
+module.exports = { protect, authenticateSession, stepUpProtect };

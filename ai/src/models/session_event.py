@@ -2,9 +2,11 @@
 session_event.py
 
 Represents user behaviour during an authenticated session.
+Includes optional context-change signals for security monitoring.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -27,12 +29,15 @@ class SessionEvent:
     rapid_actions: bool
     unusual_activity: bool
 
+    # Optional context-change signals from Node.js session monitor.
+    context_changes: Optional[dict] = field(default_factory=dict)
+
     def to_dict(self) -> dict:
         """
         Convert the session event into a dictionary.
         """
 
-        return {
+        d = {
             "username": self.username,
             "user_role": self.user_role,
             "session_duration_minutes":
@@ -52,6 +57,11 @@ class SessionEvent:
             "unusual_activity":
                 self.unusual_activity,
         }
+
+        if self.context_changes:
+            d["context_changes"] = self.context_changes
+
+        return d
 
     @classmethod
     def from_dict(cls, data: dict):
@@ -86,4 +96,5 @@ class SessionEvent:
             unusual_activity=bool(
                 data["unusual_activity"]
             ),
+            context_changes=data.get("context_changes"),
         )

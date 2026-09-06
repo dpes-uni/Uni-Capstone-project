@@ -1,7 +1,7 @@
 const express = require('express');
 const { body } = require('express-validator');
 const validate = require('../middleware/validate');
-const { protect } = require('../middleware/auth');
+const { protect, stepUpProtect } = require('../middleware/auth');
 const { upload } = require('../middleware/upload');
 const {
   listAssessments,
@@ -46,9 +46,9 @@ router.patch(
 router.delete('/:id', deleteAssessment);
 
 // Client / agent / institution: upload their identity document.
-router.post('/:id/document', upload.single('document'), uploadDocument);
+router.post('/:id/document', stepUpProtect, upload.single('document'), uploadDocument);
 
 // Client / agent / institution: view/download the document they uploaded.
-router.get('/:id/document', getOwnDocument);
+router.get('/:id/document', stepUpProtect, getOwnDocument);
 
 module.exports = router;

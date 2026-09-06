@@ -153,9 +153,32 @@ class SessionPredictor:
             risk_score=risk_score,
             risk_level=risk_level,
             recommended_action=action,
-            reason=(
-                "Session ML prediction: "
-                f"unusual_activity={is_unusual}, "
-                f"confidence={confidence:.1%}"
-            ),
+            reason=self._build_reason(is_unusual, confidence, session),
         )
+
+    def _build_reason(self, is_unusual: bool, confidence: float, session: SessionEvent) -> str:
+        """Build a human-readable reason including context-change signals."""
+        parts = [
+            f"unusual_activity={is_unusual}",
+            f"confidence={confidence:.1%}",
+        ]
+
+        ctx = session.context_changes or {}
+        changes = []
+        if ctx.get("deviceChanged"):
+            changes.append("device")
+        if ctx.get("browserChanged"):
+            changes.append("browser")
+        if ctx.get("osChanged"):
+            changes.append("OS")
+        if ctx.get("locationChanged"):
+            changes.append("location")
+        if ctx.get("vpnChanged"):
+            changes.append("VPN")
+        if ctx.get("ipChanged"):
+            changes.append("IP/country")
+
+        if changes:
+            parts.append(f"context_changes=[{', '.join(changes)}]")
+
+        return "Session ML prediction: " + ", ".join(parts)

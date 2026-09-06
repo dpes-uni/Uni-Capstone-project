@@ -455,8 +455,19 @@ def predict_session_risk():
 
 
         # --------------------------------------------------
-        # 3. Create SessionEvent
+        # 3. Create SessionEvent (context_changes is optional)
         # --------------------------------------------------
+
+        # Ensure context_changes has safe defaults if missing.
+        if "context_changes" not in data or data["context_changes"] is None:
+            data["context_changes"] = {
+                "deviceChanged": False,
+                "browserChanged": False,
+                "osChanged": False,
+                "ipChanged": False,
+                "locationChanged": False,
+                "vpnChanged": False,
+            }
 
         session = SessionEvent.from_dict(data)
 

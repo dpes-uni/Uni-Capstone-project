@@ -14,6 +14,8 @@ const {
   verifyMfa,
   requestReauthentication,
   verifyReauthentication,
+  requestStepUp,
+  verifyStepUp,
   adminSignup,
   verifyAdminSignup,
   refresh,
@@ -88,6 +90,19 @@ router.post(
   ],
   validate,
   verifyReauthentication
+);
+
+router.post('/stepup/request', authenticateSession, requestStepUp);
+
+router.post(
+  '/stepup/verify',
+  [
+    authenticateSession,
+    body('reauthId').isMongoId().withMessage('reauthId is required'),
+    body('code').isLength({ min: 6, max: 6 }).withMessage('Code must be 6 digits'),
+  ],
+  validate,
+  verifyStepUp
 );
 
 router.post(

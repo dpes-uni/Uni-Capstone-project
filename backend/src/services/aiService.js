@@ -536,6 +536,9 @@ class AiService {
       // The live backend should not calculate this value.
       unusual_activity:
         unusualActivity === true,
+
+      // Context-change signals from session baseline comparison.
+      context_changes: sessionData.contextChanges || undefined,
     };
   }
 

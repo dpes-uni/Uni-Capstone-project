@@ -10,8 +10,11 @@ const logger = require('../utils/logger');
 const { loginAttemptsTotal, loginRiskScore, loginVerificationTotal } = require('../utils/metrics');
 const {
   getSessionStatus,
-  clearSessionReauthentication,
   clearSessionByUserId,
+  establishSessionBaseline,
+  refreshSessionBaselineAfterReauth,
+  establishStepUpVerification,
+  STEP_UP_VERIFY_WINDOW_MS,
 } = require('../services/sessionMonitor');
 const {
   generateAuthToken,
@@ -482,6 +485,9 @@ async function verifyMfa(req, res, next) {
     setAuthCookie(res, token);
     await issueRefreshToken(res, user._id, { req });
 
+    // Establish the security baseline for the new session.
+    await establishSessionBaseline(req);
+
     return res.json({
       message: 'Verification successful, login complete.',
       token,
@@ -578,12 +584,119 @@ async function verifyReauthentication(req, res, next) {
     otpDoc.consumed = true;
     await otpDoc.save();
 
-    clearSessionReauthentication(req);
+    await refreshSessionBaselineAfterReauth(req);
 
     return res.json({
       message: 'Re-authentication successful. Session restored.',
       reauthenticationRequired: false,
       user: req.user.toSafeObject(),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// @route POST /api/auth/stepup/request
+// Issues a fresh OTP with purpose='stepup' so the user can verify a sensitive action.
+// The user must be authenticated. If the session is already flagged for risk-based
+// reauthentication, the client is told to use the reauth flow instead.
+async function requestStepUp(req, res, next) {
+  try {
+    // Risk-based reauth has its own dedicated flow.
+    if (getSessionStatus(req)?.requiresReauthentication) {
+      return res.status(400).json({
+        message: 'Session requires re-authentication. Use the re-authentication flow instead.',
+        useReauthFlow: true,
+      });
+    }
+
+    const code = generateOtp();
+
+    // Invalidate any prior pending step-up OTP for this user.
+    await OtpToken.updateMany(
+      { user: req.user._id, purpose: 'stepup', consumed: false },
+      { $set: { consumed: true } }
+    );
+
+    const otpDoc = await OtpToken.create({
+      user: req.user._id,
+      email: req.user.email,
+      name: req.user.name,
+      purpose: 'stepup',
+      codeHash: hashOtp(code),
+      expiresAt: new Date(Date.now() + Number(process.env.OTP_EXPIRES_MINUTES || 10) * 60000),
+      ip: getClientIp(req),
+      userAgent: req.headers['user-agent'] || 'unknown',
+    });
+
+    const { delivered } = await sendEmail({
+      to: req.user.email,
+      subject: 'Assure Docs — additional verification required',
+      text: `Your one-time passcode is ${code}. It expires in ${process.env.OTP_EXPIRES_MINUTES || 10} minutes.`,
+      html: `<p>Your one-time passcode is <strong>${code}</strong>.</p><p>It expires in ${process.env.OTP_EXPIRES_MINUTES || 10} minutes.</p>`,
+    });
+
+    return res.status(200).json({
+      message: delivered
+        ? 'A verification code has been sent to your email.'
+        : 'SMTP is not configured. In development, the OTP is available below.',
+      reauthId: otpDoc._id,
+      expiresAt: otpDoc.expiresAt,
+      ...(delivered ? {} : { devOtpCode: code }),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// @route POST /api/auth/stepup/verify
+// Validates the step-up OTP and establishes a short-lived step-up verification
+// on the session. Does NOT touch risk-based reauthentication state.
+async function verifyStepUp(req, res, next) {
+  try {
+    const { reauthId, code } = req.body;
+
+    // Risk-based reauth has its own dedicated flow.
+    if (getSessionStatus(req)?.requiresReauthentication) {
+      return res.status(400).json({
+        message: 'Session requires re-authentication. Use the re-authentication flow instead.',
+        useReauthFlow: true,
+      });
+    }
+
+    const otpDoc = await OtpToken.findOne({
+      _id: reauthId,
+      user: req.user._id,
+      purpose: 'stepup',
+      consumed: false,
+    });
+
+    if (!otpDoc || otpDoc.expiresAt < new Date()) {
+      return res.status(400).json({ message: 'This code is invalid or has expired. Please try again.' });
+    }
+
+    if (otpDoc.attempts >= otpDoc.maxAttempts) {
+      return res.status(429).json({ message: 'Too many incorrect attempts. Please request a new code.' });
+    }
+
+    if (hashOtp(String(code || '')) !== otpDoc.codeHash) {
+      otpDoc.attempts += 1;
+      await otpDoc.save();
+      return res.status(400).json({ message: 'Incorrect code, please try again.' });
+    }
+
+    otpDoc.consumed = true;
+    await otpDoc.save();
+
+    // Establish step-up verification on the session — does NOT clear requiresReauthentication.
+    const stepUpVerified = establishStepUpVerification(req);
+
+    return res.json({
+      message: 'Verification successful.',
+      stepUpVerified: {
+        purpose: stepUpVerified.purpose,
+        expiresAt: stepUpVerified.expiresAt,
+      },
     });
   } catch (err) {
     next(err);
@@ -769,6 +882,8 @@ module.exports = {
   verifyMfa,
   requestReauthentication,
   verifyReauthentication,
+  requestStepUp,
+  verifyStepUp,
   adminSignup,
   verifyAdminSignup,
   refresh,

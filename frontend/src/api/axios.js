@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { triggerReauth } from './reauth.js';
+import { triggerReauth, triggerStepUp } from './reauth.js';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
@@ -39,15 +39,31 @@ async function refreshAccessToken() {
   return pendingRefresh;
 }
 
+/**
+ * Force logout: call /auth/logout server-side, clear local token, dispatch
+ * the custom force-logout event so AuthContext clears its state.
+ */
+async function forceLogout() {
+  try {
+    await api.post('/auth/logout');
+  } catch {
+    // ignore server-side logout errors
+  }
+  localStorage.removeItem('ad_token');
+  window.dispatchEvent(new Event('ad:force-logout'));
+}
+
 // On 401, try to refresh once and retry the failed request.
-// On 403 with `reauthenticationRequired`, prompt the user to re-authenticate
-// via the active session, then retry the original request.
+// On 403 with `stepUpRequired: true`, prompt for step-up MFA, retry on success.
+// On 403 with `reauthenticationRequired: true`, prompt for risk-based reauth, retry on success.
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const { config, response } = error;
     const status = response ? response.status : null;
+    const body = response?.data || {};
 
+    // ── 401: Token expired — attempt a single refresh. ──────────────────────
     if (status === 401 && !config.__isRetry) {
       config.__isRetry = true;
       try {
@@ -56,14 +72,42 @@ api.interceptors.response.use(
           config.headers.Authorization = `Bearer ${token}`;
           return api(config);
         }
-      } catch (refreshError) {
-        localStorage.removeItem('ad_token');
+      } catch {
+        // Refresh failed — fall through to logout.
       }
+      await forceLogout();
+      return Promise.reject(error);
     }
 
+    // ── 403: Step-up MFA required ─────────────────────────────────────────────
+    // Run BEFORE the risk-based reauth check so that step-up takes priority
+    // when the user is on a sensitive-action path. A step-up verification does
+    // NOT clear requiresReauthentication on the backend, so a subsequent request
+    // will still trigger the risk-based flow if needed.
     if (
       status === 403 &&
-      response?.data?.reauthenticationRequired &&
+      body.stepUpRequired === true &&
+      !config.__stepUpRetry
+    ) {
+      config.__stepUpRetry = true;
+      try {
+        // `action` is an optional human-readable description the backend can
+        // include to make the modal copy more specific.
+        const actionLabel = body.action || null;
+        await triggerStepUp(actionLabel);
+        config.headers.Authorization = `Bearer ${localStorage.getItem('ad_token')}`;
+        return api(config);
+      } catch {
+        // User cancelled or step-up verification failed — force logout.
+        await forceLogout();
+      }
+      return Promise.reject(error);
+    }
+
+    // ── 403: Risk-based re-authentication required ───────────────────────────
+    if (
+      status === 403 &&
+      body.reauthenticationRequired &&
       !config.__reauthRetry
     ) {
       config.__reauthRetry = true;
@@ -71,16 +115,10 @@ api.interceptors.response.use(
         await triggerReauth();
         config.headers.Authorization = `Bearer ${localStorage.getItem('ad_token')}`;
         return api(config);
-      } catch (reauthError) {
-        // User cancelled or re-authentication failed: force a logout.
-        try {
-          await api.post('/auth/logout');
-        } catch {
-          // ignore
-        }
-        localStorage.removeItem('ad_token');
-        window.dispatchEvent(new Event('ad:force-logout'));
+      } catch {
+        await forceLogout();
       }
+      return Promise.reject(error);
     }
 
     return Promise.reject(error);
