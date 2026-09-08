@@ -7,6 +7,9 @@ const sessions = new Map();
 const RAPID_ACTION_WINDOW_MS = 10_000;
 const RAPID_ACTION_COUNT = 5;
 
+const SESSION_IDLE_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes of inactivity
+const HIGH_RISK_TERMINATE_TIMEOUT_MS = 30 * 1000; // 30 seconds before forced termination
+
 function getRequestToken(req) {
   const authHeader = req?.headers?.authorization;
 
@@ -55,6 +58,33 @@ function getSessionStatus(req) {
   return sessions.get(key) || null;
 }
 
+function getSessionTimeoutInfo(req) {
+  const session = getSessionStatus(req);
+  if (!session) {
+    return { idleTimeout: false, highRiskTerminate: false, timeUntilExpire: 0 };
+  }
+
+  const now = Date.now();
+  const timeSinceLastActivity = now - (session.lastActivity || now);
+  const timeUntilIdleExpire = Math.max(0, SESSION_IDLE_TIMEOUT_MS - timeSinceLastActivity);
+  const isIdleTimedOut = timeSinceLastActivity >= SESSION_IDLE_TIMEOUT_MS;
+
+  let highRiskTerminate = false;
+  let timeUntilHighRiskExpire = 0;
+
+  if (session.riskLevel === 'high' && session.recommendedAction === 'Require Additional Verification') {
+    const timeSinceRiskCheck = now - (session.lastRiskCheckedAt || now);
+    timeUntilHighRiskExpire = Math.max(0, HIGH_RISK_TERMINATE_TIMEOUT_MS - timeSinceRiskCheck);
+    highRiskTerminate = timeSinceRiskCheck >= HIGH_RISK_TERMINATE_TIMEOUT_MS;
+  }
+
+  return {
+    idleTimeout: isIdleTimedOut,
+    highRiskTerminate,
+    timeUntilExpire: Math.min(timeUntilIdleExpire, timeUntilHighRiskExpire),
+  };
+}
+
 function isHighRiskSession(riskResult) {
   if (!riskResult || typeof riskResult !== 'object') {
     return false;
@@ -82,6 +112,8 @@ function updateSessionRiskState(session, riskResult) {
 
   const requiresReauthentication = isHighRiskSession(riskResult);
 
+  session.riskLevel = riskResult.risk_level || 'low';
+
   if (requiresReauthentication) {
     session.requiresReauthentication = true;
     session.riskDecision = 'reauth_required';
@@ -104,6 +136,7 @@ function clearSessionReauthentication(req) {
   session.lastRiskResult = null;
   session.lastRiskCheckedAt = null;
   session.riskDecision = 'continue';
+  session.riskLevel = 'low';
   session.actionTimestamps = [];
   session.failedActions = 0;
 
@@ -130,6 +163,7 @@ function getOrCreateSession(req) {
       userRole: req.user.role,
 
       startedAt: Date.now(),
+      lastActivity: Date.now(),
 
       documentsViewed: 0,
       documentsDownloaded: 0,
@@ -142,6 +176,7 @@ function getOrCreateSession(req) {
       lastRiskResult: null,
       lastRiskCheckedAt: null,
       riskDecision: 'unknown',
+      riskLevel: 'low',
     };
 
     sessions.set(key, session);
@@ -157,6 +192,8 @@ function getOrCreateSession(req) {
  */
 function recordAction(session, now) {
   session.actionTimestamps.push(now);
+
+  session.lastActivity = now;
 
   const cutoff =
     now - RAPID_ACTION_WINDOW_MS;
@@ -424,6 +461,7 @@ module.exports = {
   clearSessionByUserId,
   clearSessionReauthentication,
   getSessionStatus,
+  getSessionTimeoutInfo,
   isSessionReauthenticationRequired: (req) =>
     Boolean(getSessionStatus(req)?.requiresReauthentication),
 };

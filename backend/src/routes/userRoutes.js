@@ -6,6 +6,7 @@ const {
   getLoginActivity,
   getDashboardSummary,
   updateProfile,
+  getSessionTimeout,
 } = require('../controllers/userController');
 
 const router = express.Router();
@@ -14,6 +15,7 @@ router.use(protect);
 
 router.get('/login-activity', getLoginActivity);
 router.get('/dashboard-summary', getDashboardSummary);
+router.get('/session-timeout', getSessionTimeout);
 router.patch(
   '/me',
   [
