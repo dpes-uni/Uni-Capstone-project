@@ -48,6 +48,14 @@ api.interceptors.response.use(
     const { config, response } = error;
     const status = response ? response.status : null;
 
+    // Backend force-terminated the session (high-risk grace period expired).
+    // Clear everything and force a reload to the login page.
+    if (status === 401 && response?.data?.sessionTerminated) {
+      localStorage.removeItem('ad_token');
+      window.dispatchEvent(new Event('ad:force-logout'));
+      return Promise.reject(error);
+    }
+
     if (status === 401 && !config.__isRetry) {
       config.__isRetry = true;
       try {

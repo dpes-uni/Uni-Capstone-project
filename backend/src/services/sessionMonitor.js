@@ -1,6 +1,7 @@
 const aiService = require('./aiService');
 const logger = require('../utils/logger');
 const { hashToken } = require('../utils/generateToken');
+const SessionEvent = require('../models/SessionEvent');
 
 const sessions = new Map();
 
@@ -424,6 +425,29 @@ async function recordSessionEvent(
 
 
 /**
+ * Persist a session summary to MongoDB for later use in ML retraining.
+ * Called before a session is deleted from the in-memory Map.
+ */
+async function persistSessionSummary(session) {
+  try {
+    await SessionEvent.create({
+      user: session.userId.replace('user:', ''),
+      userRole: session.userRole,
+      sessionDurationMinutes: Math.max(0, Math.floor((Date.now() - session.startedAt) / 60000)),
+      documentsViewed: session.documentsViewed,
+      documentsDownloaded: session.documentsDownloaded,
+      documentsUploaded: session.documentsUploaded,
+      verificationActions: session.verificationActions,
+      failedActions: session.failedActions,
+      rapidActions: session.actionTimestamps.length >= 5,
+      unusualActivity: session.requiresReauthentication,
+    });
+  } catch (err) {
+    logger.warn('Failed to persist session summary', { error: err.message });
+  }
+}
+
+/**
  * Remove the monitored session.
  *
  * This will be called when the user logs out or when the
@@ -433,6 +457,10 @@ function clearSession(req) {
   const key = getSessionKey(req);
 
   if (key) {
+    const session = sessions.get(key);
+    if (session) {
+      persistSessionSummary(session);
+    }
     sessions.delete(key);
   }
 }
@@ -450,6 +478,10 @@ function clearSessionByUserId(userId) {
   }
 
   const key = `user:${userId}`;
+  const session = sessions.get(key);
+  if (session) {
+    persistSessionSummary(session);
+  }
   return sessions.delete(key);
 }
 

@@ -3,8 +3,14 @@ const axios = require('axios');
 jest.mock('axios');
 jest.mock('../src/services/ipService', () => ({
   getIpGeolocation: jest.fn(async (ip) =>
-    ip === '203.0.113.9' ? { country: 'United States', city: 'Austin' } : { country: 'Unknown', city: 'Unknown' }
+    ip === '203.0.113.9'
+      ? { country: 'United States', city: 'Austin', org: '', asn: null }
+      : { country: 'Unknown', city: 'Unknown', org: '', asn: null }
   ),
+  detectVpn: jest.fn(() => false),
+}));
+jest.mock('../src/models/LoginActivity', () => ({
+  distinct: jest.fn(async () => []),
 }));
 
 const aiService = require('../src/services/aiService');

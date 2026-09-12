@@ -1,51 +1,50 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api/axios.js';
 
-const HIGH_RISK_TERMINATE_MS = 30 * 1000; // 30 seconds before forced termination
-
 export default function RiskWarningPopup({ onForceLogout }) {
   const [show, setShow] = useState(false);
-  const [countdown, setCountdown] = useState(30);
+  const [countdown, setCountdown] = useState(0);
   const [reason, setReason] = useState('');
 
   const handleForceLogout = useCallback(() => {
     setShow(false);
-    setCountdown(30);
+    setCountdown(0);
     setReason('');
     if (onForceLogout) onForceLogout();
   }, [onForceLogout]);
 
-  useEffect(() => {
-    if (!show) return;
-
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          handleForceLogout();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [show, handleForceLogout]);
-
+  // Poll the backend for session risk status.
+  // When the popup is visible, poll every second so the countdown stays
+  // synced with the server-side 30-second grace period.
+  // When hidden, poll every 15 seconds to detect when a session becomes risky.
   useEffect(() => {
     let cancelled = false;
-    let pollTimer = null;
 
     const checkSession = async () => {
       try {
         const { data } = await api.get('/users/session-timeout');
         if (cancelled) return;
 
-        if (data.riskLevel === 'high' || data.requiresReauthentication || data.highRiskTerminate) {
-          setReason(data.requiresReauthentication
-            ? 'Suspicious activity detected on your session.'
-            : 'High-risk activity detected on your session.');
+        if (data.highRiskTerminate) {
+          // Grace period expired — force logout immediately
+          handleForceLogout();
+          return;
+        }
+
+        if (data.requiresReauthentication || data.riskLevel === 'high') {
+          const secs = Math.max(0, Math.ceil((data.timeUntilExpire || 0) / 1000));
+          setCountdown(secs);
+          setReason(
+            data.requiresReauthentication
+              ? 'Suspicious activity detected on your session.'
+              : 'High-risk activity detected on your session.'
+          );
           setShow(true);
+        } else {
+          // Session is no longer risky (user re-authenticated)
+          setShow(false);
+          setCountdown(0);
+          setReason('');
         }
       } catch {
         // Ignore errors — session check is best-effort
@@ -53,13 +52,13 @@ export default function RiskWarningPopup({ onForceLogout }) {
     };
 
     checkSession();
-    pollTimer = setInterval(checkSession, 15000); // Check every 15 seconds
+    const interval = setInterval(checkSession, show ? 1000 : 15000);
 
     return () => {
       cancelled = true;
-      if (pollTimer) clearInterval(pollTimer);
+      clearInterval(interval);
     };
-  }, []);
+  }, [show, handleForceLogout]);
 
   if (!show) return null;
 
