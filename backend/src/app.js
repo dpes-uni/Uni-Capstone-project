@@ -9,6 +9,7 @@ const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const assessmentRoutes = require('./routes/assessmentRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const debugRoutes = require('./routes/debugRoutes');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const logger = require('./utils/logger');
 const metrics = require('./utils/metrics');
@@ -121,6 +122,11 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/assessments', assessmentRoutes);
 app.use('/api/admin', adminRoutes);
+
+// --- debug endpoints (dev only, remove before submission) ---
+if (process.env.NODE_ENV !== 'production') {
+  app.use('/api/debug', debugRoutes);
+}
 
 // --- optional: serve the built React SPA from the backend in production ---
 // Enable with SERVE_FRONTEND=true and point FRONTEND_DIST at the build output
