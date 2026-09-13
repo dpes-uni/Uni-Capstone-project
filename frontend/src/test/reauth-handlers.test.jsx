@@ -23,7 +23,7 @@ describe('reauth.js — handler registration', () => {
 
   it('triggerReauth resolves when the reauth handler completes successfully', async () => {
     let called = false;
-    setReauthHandler(() => {
+    setReauthHandler(async () => {
       called = true;
     });
     const promise = triggerReauth();
@@ -33,7 +33,7 @@ describe('reauth.js — handler registration', () => {
 
   it('triggerStepUp passes actionLabel to the step-up handler', async () => {
     let receivedLabel = undefined;
-    setStepUpHandler((label) => {
+    setStepUpHandler(async (label) => {
       receivedLabel = label;
     });
     await triggerStepUp('document_upload');
@@ -42,7 +42,7 @@ describe('reauth.js — handler registration', () => {
 
   it('triggerStepUp works with null label', async () => {
     let receivedLabel = undefined;
-    setStepUpHandler((label) => {
+    setStepUpHandler(async (label) => {
       receivedLabel = label;
     });
     await triggerStepUp(null);
@@ -59,7 +59,7 @@ describe('reauth.js — handler registration', () => {
 
   it('concurrent triggerStepUp calls share the same inflight promise', async () => {
     let callCount = 0;
-    setStepUpHandler(() => {
+    setStepUpHandler(async () => {
       callCount++;
     });
     const [p1, p2, p3] = [triggerStepUp('a'), triggerStepUp('b'), triggerStepUp('c')];
@@ -70,7 +70,7 @@ describe('reauth.js — handler registration', () => {
 
   it('subsequent triggerStepUp after resolution calls handler again', async () => {
     let callCount = 0;
-    setStepUpHandler(() => {
+    setStepUpHandler(async () => {
       callCount++;
     });
     await triggerStepUp();
@@ -81,8 +81,8 @@ describe('reauth.js — handler registration', () => {
   it('reauth and step-up handlers are independent', async () => {
     let reauthCalled = false;
     let stepupCalled = false;
-    setReauthHandler(() => { reauthCalled = true; });
-    setStepUpHandler(() => { stepupCalled = true; });
+    setReauthHandler(async () => { reauthCalled = true; });
+    setStepUpHandler(async () => { stepupCalled = true; });
     await triggerReauth();
     await triggerStepUp();
     expect(reauthCalled).toBe(true);

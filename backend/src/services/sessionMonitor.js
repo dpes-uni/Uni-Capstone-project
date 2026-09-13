@@ -225,7 +225,11 @@ function updateSessionRiskState(session, riskResult) {
       ? accumulatedClass
       : aiClass;
 
-  session.riskLevel = riskResult.risk_level || 'low';
+  session.riskLevel = finalClass;
+  session.recommendedAction =
+    finalClass === 'high' || finalClass === 'critical'
+      ? 'Require Additional Verification'
+      : null;
 
   if (finalClass === 'high' || finalClass === 'critical') {
     session.requiresReauthentication = true;
@@ -250,6 +254,7 @@ function clearSessionReauthentication(req) {
   session.lastRiskCheckedAt = null;
   session.riskDecision = 'continue';
   session.riskLevel = 'low';
+  session.recommendedAction = null;
   session.actionTimestamps = [];
   session.failedActions = 0;
   session.accumulatedRisk = 0;

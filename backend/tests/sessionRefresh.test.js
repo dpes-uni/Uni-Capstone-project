@@ -19,18 +19,39 @@ process.env.REFRESH_TOKEN_EXPIRES_IN_DAYS = '7';
 process.env.OTP_EXPIRY_MINUTES = '10';
 process.env.OTP_MAX_ATTEMPTS = '5';
 
-// Load .env from backend root so MONGO_URI is available
-require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+// AI service is not available in CI — mock it so risk assessment is deterministic.
+// Other backend test files (riskAccumulation, riskThresholds) use the same pattern.
+jest.mock('../src/services/aiService', () => ({
+  extractDeviceInfo: jest.fn(() => ({
+    device: 'Desktop',
+    browser: 'Chrome',
+    operatingSystem: 'Windows',
+  })),
+  assessSessionRisk: jest.fn(),
+}));
 
 const request = require('supertest');
+const { MongoMemoryServer } = require('mongodb-memory-server');
+const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
-const path = require('path');
 
 const app = require('../src/app');
 const User = require('../src/models/User');
 const OtpToken = require('../src/models/OtpToken');
 const RefreshToken = require('../src/models/RefreshToken');
 const sessionMonitor = require('../src/services/sessionMonitor');
+const aiService = require('../src/services/aiService');
+
+// Default: high risk so the 403 enforcement gate fires.
+// Tests that need lower risk override this per-test.
+aiService.assessSessionRisk.mockResolvedValue({
+  risk_score: 95,
+  risk_level: 'critical',
+  recommended_action: 'Block Login',
+  reason: 'critical',
+});
+
+let mongo;
 
 // Unique suffix per run so each test gets a fresh user + fresh session
 const TEST_SUFFIX = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
@@ -39,10 +60,10 @@ const mkEmail = (n) => `regresstest${n}-${TEST_SUFFIX}@test.com`;
 beforeAll(async () => {
   // app.js does not call connectDB() — server.js does. Tests need their own.
   const connectDB = require('../src/config/db');
-  const mongoose = require('mongoose');
-  if (mongoose.connection.readyState !== 1) {
-    await connectDB();
-  }
+
+  mongo = await MongoMemoryServer.create();
+  process.env.MONGO_URI = mongo.getUri();
+  await connectDB();
 }, 30000);
 
 afterAll(async () => {
@@ -51,9 +72,11 @@ afterAll(async () => {
   await OtpToken.deleteMany({});
   await RefreshToken.deleteMany({});
   // Close mongoose connection so Jest can exit cleanly
-  const mongoose = require('mongoose');
   if (mongoose.connection.readyState === 1) {
     await mongoose.connection.close();
+  }
+  if (mongo) {
+    await mongo.stop();
   }
 }, 15000);
 

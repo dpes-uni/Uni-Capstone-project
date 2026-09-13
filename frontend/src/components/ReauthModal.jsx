@@ -50,24 +50,7 @@ export default function ReauthModal() {
     [resetState]
   );
 
-  // Risk-based re-authentication handler.
-  const runReauth = useCallback(() => {
-    return openModal('reauth', null).then(() => requestCode('/auth/reauth/request'));
-  }, [openModal]);
-
-  // Step-up MFA handler. `label` may be a short action key (e.g. 'document_upload')
-  // or null for the generic prompt.
-  const runStepUp = useCallback(
-    (label) => {
-      const copy =
-        (label && STEP_UP_ACTION_COPY[label]) ||
-        (typeof label === 'string' && label) ||
-        null;
-      return openModal('stepup', copy).then(() => requestCode('/auth/stepup/request'));
-    },
-    [openModal]
-  );
-
+  // Request a one-time verification code from the backend.
   const requestCode = useCallback(async (endpoint) => {
     setLoading(true);
     setError('');
@@ -83,6 +66,28 @@ export default function ReauthModal() {
       setLoading(false);
     }
   }, []);
+
+  // Risk-based re-authentication handler.
+  const runReauth = useCallback(() => {
+    const promise = openModal('reauth', null);
+    requestCode('/auth/reauth/request');
+    return promise;
+  }, [openModal, requestCode]);
+
+  // Step-up MFA handler. `label` may be a short action key (e.g. 'document_upload')
+  // or null for the generic prompt.
+  const runStepUp = useCallback(
+    (label) => {
+      const copy =
+        (label && STEP_UP_ACTION_COPY[label]) ||
+        (typeof label === 'string' && label) ||
+        null;
+      const promise = openModal('stepup', copy);
+      requestCode('/auth/stepup/request');
+      return promise;
+    },
+    [openModal, requestCode]
+  );
 
   const submit = useCallback(
     async (e) => {

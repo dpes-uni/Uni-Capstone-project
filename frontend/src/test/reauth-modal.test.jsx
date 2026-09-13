@@ -5,14 +5,17 @@
  * The modal registers its handler via setReauthHandler / setStepUpHandler in a
  * useEffect. We capture the registered functions to trigger the modal directly.
  *
- * NOTE: runStepUp/runReauth return a promise that resolves only when the user
- * submits the OTP form — that flow is not testable without a real API connection.
- * We test the MODAL RENDERING (the synchronous setOpen(true) call), which is what
- * the user sees immediately after the trigger.
+ * The handler (runReauth/runStepUp) returns a Promise that:
+ *   - Opens the modal immediately
+ *   - Fires the OTP request immediately
+ *   - Resolves only after successful OTP verification
+ *   - Rejects if the user cancels
+ *
+ * Tests verify this actual sequencing rather than only checking visual output.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import React from 'react';
 
 // Mocks must be at top — vi.mock is hoisted.
@@ -35,20 +38,43 @@ vi.mock('../api/reauth.js', () => ({
   clearHandlers: vi.fn(),
 }));
 
-// Mock axios — ReauthModal calls api.post() when requesting OTP codes.
+// Dynamic post mock — different endpoints return different responses.
+const postMock = vi.fn();
+
 vi.mock('../api/axios.js', () => ({
   default: {
-    post: vi.fn().mockResolvedValue({ data: { reauthId: 'test-id' } }),
+    post: postMock,
   },
 }));
 
 const ReauthModal = (await import('../components/ReauthModal.jsx')).default;
 
-describe('ReauthModal — step-up vs reauth mode', () => {
-  // Reset handlers before each test.
+function setupRequestMock() {
+  postMock.mockImplementation((url) => {
+    if (url.includes('/reauth/request') || url.includes('/stepup/request')) {
+      return Promise.resolve({ data: { reauthId: 'test-reauth-id', devOtpCode: '123456' } });
+    }
+    if (url.includes('/reauth/verify') || url.includes('/stepup/verify')) {
+      return Promise.resolve({ data: {} });
+    }
+    return Promise.resolve({ data: {} });
+  });
+}
+
+function resetRequestMock() {
+  postMock.mockReset();
+  setupRequestMock();
+}
+
+describe('ReauthModal — handler triggers request immediately', () => {
   beforeEach(() => {
     handlers.reauth = null;
     handlers.stepup = null;
+    resetRequestMock();
+  });
+
+  afterEach(() => {
+    postMock.mockReset();
   });
 
   it('captures the reauth and step-up handlers on mount', async () => {
@@ -59,37 +85,175 @@ describe('ReauthModal — step-up vs reauth mode', () => {
     }, { timeout: 2000 });
   });
 
-  it('renders the modal when opened for reauth', async () => {
+  it('reauth handler opens modal and calls /auth/reauth/request', async () => {
     render(<ReauthModal />);
     await waitFor(() => expect(handlers.reauth).not.toBeNull(), { timeout: 2000 });
-    // runReauth opens the modal synchronously (setOpen(true)) then requests OTP.
-    // The user sees the modal immediately; the API call is async and does not
-    // affect render — so we test the DOM state after the sync state update.
-    await act(async () => {
-      handlers.reauth(); // Don't await — the promise never resolves in tests
+
+    const handlerPromise = handlers.reauth().catch(() => {});
+
+    await waitFor(() => {
+      expect(postMock).toHaveBeenCalledWith('/auth/reauth/request');
     });
     await waitFor(() => {
       expect(screen.queryByText('Verification required')).not.toBeNull();
     });
+
+    // Modal stays open — handler promise is pending, waiting for OTP verification
+    expect(screen.queryByText('Verification required')).not.toBeNull();
+    expect(screen.queryByText('Could not start verification.')).toBeNull();
   });
 
-  it('shows step-up title when opened for step-up', async () => {
+  it('step-up handler opens modal and calls /auth/stepup/request', async () => {
     render(<ReauthModal />);
     await waitFor(() => expect(handlers.stepup).not.toBeNull(), { timeout: 2000 });
-    await act(async () => {
-      handlers.stepup('document_upload'); // Don't await — promise never resolves
+
+    const handlerPromise = handlers.stepup('document_upload').catch(() => {});
+
+    await waitFor(() => {
+      expect(postMock).toHaveBeenCalledWith('/auth/stepup/request');
     });
     await waitFor(() => {
       expect(screen.queryByText('Additional verification required')).not.toBeNull();
     });
+
+    // Modal stays open — handler promise is pending
+    expect(screen.queryByText('Additional verification required')).not.toBeNull();
+    expect(screen.queryByText('Could not start verification.')).toBeNull();
+  });
+
+  it('successful reauth verifies using the returned reauthId', async () => {
+    render(<ReauthModal />);
+    await waitFor(() => expect(handlers.reauth).not.toBeNull(), { timeout: 2000 });
+
+    const handlerPromise = handlers.reauth();
+
+    // Modal opens immediately
+    await waitFor(() => {
+      expect(screen.queryByText('Verification required')).not.toBeNull();
+    });
+
+    // Dev OTP code displayed
+    expect(screen.getByText(/123456/)).toBeInTheDocument();
+
+    // Submit the form with the OTP
+    const input = screen.getByLabelText('Verification code');
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '123456' } });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
+    });
+
+    // Modal closes on success
+    await waitFor(() => {
+      expect(screen.queryByText('Verification required')).toBeNull();
+    });
+
+    // Verified with the correct endpoint and reauthId
+    expect(postMock).toHaveBeenCalledWith('/auth/reauth/verify',
+      expect.objectContaining({ reauthId: 'test-reauth-id', code: '123456' }));
+
+    // Handler promise resolved
+    await expect(handlerPromise).resolves.toBeUndefined();
+  });
+
+  it('successful step-up verifies using the returned reauthId', async () => {
+    render(<ReauthModal />);
+    await waitFor(() => expect(handlers.stepup).not.toBeNull(), { timeout: 2000 });
+
+    const handlerPromise = handlers.stepup('document_upload');
+
+    await waitFor(() => {
+      expect(screen.queryByText('Additional verification required')).not.toBeNull();
+    });
+
+    expect(screen.getByText(/123456/)).toBeInTheDocument();
+
+    const input = screen.getByLabelText('Verification code');
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '123456' } });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Additional verification required')).toBeNull();
+    });
+
+    expect(postMock).toHaveBeenCalledWith('/auth/stepup/verify',
+      expect.objectContaining({ reauthId: 'test-reauth-id', code: '123456' }));
+
+    await expect(handlerPromise).resolves.toBeUndefined();
+  });
+
+  it('cancellation rejects the handler promise', async () => {
+    render(<ReauthModal />);
+    await waitFor(() => expect(handlers.reauth).not.toBeNull(), { timeout: 2000 });
+
+    const handlerPromise = handlers.reauth();
+    // Pre-attach catch to avoid unhandled rejection between cancel and assertion.
+    handlerPromise.catch(() => {});
+
+    await waitFor(() => {
+      expect(screen.queryByText('Verification required')).not.toBeNull();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Log out instead/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Verification required')).toBeNull();
+    });
+
+    await expect(handlerPromise).rejects.toThrow('verification-cancelled');
+  });
+
+  it('failed OTP verification keeps the modal open and shows the error', async () => {
+    render(<ReauthModal />);
+    await waitFor(() => expect(handlers.reauth).not.toBeNull(), { timeout: 2000 });
+
+    const handlerPromise = handlers.reauth().catch(() => {});
+
+    await waitFor(() => {
+      expect(screen.queryByText('Verification required')).not.toBeNull();
+    });
+
+    // Override verify to fail
+    postMock.mockImplementation((url) => {
+      if (url.includes('/reauth/request')) return Promise.resolve({ data: { reauthId: 'test-reauth-id', devOtpCode: '123456' } });
+      if (url.includes('/reauth/verify')) return Promise.reject({ response: { data: { message: 'Invalid code' } } });
+      return Promise.resolve({ data: {} });
+    });
+
+    const input = screen.getByLabelText('Verification code');
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '000000' } });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
+    });
+
+    // Modal should still be open
+    await waitFor(() => {
+      expect(screen.queryByText('Verification required')).not.toBeNull();
+    });
+    expect(screen.getByText('Invalid code')).toBeInTheDocument();
+
+    expect(postMock).toHaveBeenCalledWith('/auth/reauth/verify',
+      expect.objectContaining({ reauthId: 'test-reauth-id', code: '000000' }));
   });
 
   it('step-up mode shows the action label in the subtitle', async () => {
     render(<ReauthModal />);
     await waitFor(() => expect(handlers.stepup).not.toBeNull(), { timeout: 2000 });
-    await act(async () => {
-      handlers.stepup('document_upload');
-    });
+
+    handlers.stepup('document_upload').catch(() => {});
+
     await waitFor(() => {
       const text = screen.getByText(/upload this document/i);
       expect(text).not.toBeNull();
@@ -99,23 +263,11 @@ describe('ReauthModal — step-up vs reauth mode', () => {
   it('step-up mode shows generic subtitle when label is null', async () => {
     render(<ReauthModal />);
     await waitFor(() => expect(handlers.stepup).not.toBeNull(), { timeout: 2000 });
-    await act(async () => {
-      handlers.stepup(null);
-    });
-    await waitFor(() => {
-      // Title + subtitle both contain "additional verification"; just check >= 1.
-      expect(screen.queryAllByText(/additional verification/i).length).toBeGreaterThanOrEqual(1);
-    });
-  });
 
-  it('reauth mode shows standard "Verification required" title', async () => {
-    render(<ReauthModal />);
-    await waitFor(() => expect(handlers.reauth).not.toBeNull(), { timeout: 2000 });
-    await act(async () => {
-      handlers.reauth();
-    });
+    handlers.stepup(null).catch(() => {});
+
     await waitFor(() => {
-      expect(screen.queryByText('Verification required')).not.toBeNull();
+      expect(screen.queryAllByText(/additional verification/i).length).toBeGreaterThanOrEqual(1);
     });
   });
 });
