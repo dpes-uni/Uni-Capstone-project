@@ -1,6 +1,7 @@
 const LoginActivity = require('../models/LoginActivity');
 const Assessment = require('../models/Assessment');
 const User = require('../models/User');
+const { getSessionTimeoutInfo, getSessionStatus } = require('../services/sessionMonitor');
 
 // @route GET /api/users/login-activity
 async function getLoginActivity(req, res, next) {
@@ -65,4 +66,24 @@ async function updateProfile(req, res, next) {
   }
 }
 
-module.exports = { getLoginActivity, getDashboardSummary, updateProfile };
+// @route GET /api/users/session-timeout
+// Returns the current session timeout/risk status so the frontend can enforce
+// high-risk termination and idle timeout warnings.
+async function getSessionTimeout(req, res, next) {
+  try {
+    const timeoutInfo = getSessionTimeoutInfo(req);
+    const sessionStatus = getSessionStatus(req);
+
+    res.json({
+      idleTimeout: timeoutInfo.idleTimeout,
+      highRiskTerminate: timeoutInfo.highRiskTerminate,
+      timeUntilExpire: timeoutInfo.timeUntilExpire,
+      riskLevel: sessionStatus?.riskLevel || 'low',
+      requiresReauthentication: sessionStatus?.requiresReauthentication || false,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { getLoginActivity, getDashboardSummary, updateProfile, getSessionTimeout };

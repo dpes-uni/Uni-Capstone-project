@@ -3,6 +3,7 @@ const logger = require('../utils/logger');
 const { hashToken, getClientIp } = require('../utils/generateToken');
 const { getIpGeolocation, detectVpn } = require('./ipService');
 const { recordSecurityEvent } = require('./securityEventService');
+const SessionEvent = require('../models/SessionEvent');
 
 // In-memory session store keyed by userId.
 // Each session holds both behavioural state and security baseline.
@@ -28,6 +29,10 @@ const DECAY_PER_SECOND = Number(
 const STEP_UP_VERIFY_WINDOW_MS = Number(
   process.env.STEP_UP_VERIFY_WINDOW_MS ?? 2 * 60 * 1000
 );
+
+// Session timeout tracking.
+const SESSION_IDLE_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes of inactivity
+const HIGH_RISK_TERMINATE_TIMEOUT_MS = 30 * 1000; // 30 seconds before forced termination
 
 function getRequestToken(req) {
   const authHeader = req?.headers?.authorization;
@@ -117,6 +122,33 @@ function classifySessionRisk(riskResult) {
   return 'low';
 }
 
+function getSessionTimeoutInfo(req) {
+  const session = getSessionStatus(req);
+  if (!session) {
+    return { idleTimeout: false, highRiskTerminate: false, timeUntilExpire: 0 };
+  }
+
+  const now = Date.now();
+  const timeSinceLastActivity = now - (session.lastActivity || now);
+  const timeUntilIdleExpire = Math.max(0, SESSION_IDLE_TIMEOUT_MS - timeSinceLastActivity);
+  const isIdleTimedOut = timeSinceLastActivity >= SESSION_IDLE_TIMEOUT_MS;
+
+  let highRiskTerminate = false;
+  let timeUntilHighRiskExpire = 0;
+
+  if (session.riskLevel === 'high' && session.recommendedAction === 'Require Additional Verification') {
+    const timeSinceRiskCheck = now - (session.lastRiskCheckedAt || now);
+    timeUntilHighRiskExpire = Math.max(0, HIGH_RISK_TERMINATE_TIMEOUT_MS - timeSinceRiskCheck);
+    highRiskTerminate = timeSinceRiskCheck >= HIGH_RISK_TERMINATE_TIMEOUT_MS;
+  }
+
+  return {
+    idleTimeout: isIdleTimedOut,
+    highRiskTerminate,
+    timeUntilExpire: Math.min(timeUntilIdleExpire, timeUntilHighRiskExpire),
+  };
+}
+
 function isHighRiskSession(riskResult) {
   return classifySessionRisk(riskResult) === 'high';
 }
@@ -193,6 +225,8 @@ function updateSessionRiskState(session, riskResult) {
       ? accumulatedClass
       : aiClass;
 
+  session.riskLevel = riskResult.risk_level || 'low';
+
   if (finalClass === 'high' || finalClass === 'critical') {
     session.requiresReauthentication = true;
     session.riskDecision = 'reauth_required';
@@ -215,6 +249,7 @@ function clearSessionReauthentication(req) {
   session.lastRiskResult = null;
   session.lastRiskCheckedAt = null;
   session.riskDecision = 'continue';
+  session.riskLevel = 'low';
   session.actionTimestamps = [];
   session.failedActions = 0;
   session.accumulatedRisk = 0;
@@ -244,6 +279,7 @@ function getOrCreateSession(req) {
       userRole: req.user.role,
 
       startedAt: Date.now(),
+      lastActivity: Date.now(),
 
       documentsViewed: 0,
       documentsDownloaded: 0,
@@ -258,6 +294,7 @@ function getOrCreateSession(req) {
       riskDecision: 'unknown',
       accumulatedRisk: 0,
       accumulatedRiskUpdatedAt: null,
+      riskLevel: 'low',
 
       // Security baseline captured at session start (for context-change detection).
       // Populated asynchronously by establishSessionBaseline().
@@ -277,6 +314,8 @@ function getOrCreateSession(req) {
  */
 function recordAction(session, now) {
   session.actionTimestamps.push(now);
+
+  session.lastActivity = now;
 
   const cutoff =
     now - RAPID_ACTION_WINDOW_MS;
@@ -572,6 +611,29 @@ async function recordSessionEvent(
 
 
 /**
+ * Persist a session summary to MongoDB for later use in ML retraining.
+ * Called before a session is deleted from the in-memory Map.
+ */
+async function persistSessionSummary(session) {
+  try {
+    await SessionEvent.create({
+      user: session.userId.replace('user:', ''),
+      userRole: session.userRole,
+      sessionDurationMinutes: Math.max(0, Math.floor((Date.now() - session.startedAt) / 60000)),
+      documentsViewed: session.documentsViewed,
+      documentsDownloaded: session.documentsDownloaded,
+      documentsUploaded: session.documentsUploaded,
+      verificationActions: session.verificationActions,
+      failedActions: session.failedActions,
+      rapidActions: session.actionTimestamps.length >= 5,
+      unusualActivity: session.requiresReauthentication,
+    });
+  } catch (err) {
+    logger.warn('Failed to persist session summary', { error: err.message });
+  }
+}
+
+/**
  * Remove the monitored session.
  *
  * This will be called when the user logs out or when the
@@ -581,6 +643,10 @@ function clearSession(req) {
   const key = getSessionKey(req);
 
   if (key) {
+    const session = sessions.get(key);
+    if (session) {
+      persistSessionSummary(session);
+    }
     sessions.delete(key);
   }
 }
@@ -673,6 +739,10 @@ function clearSessionByUserId(userId) {
   }
 
   const key = `user:${userId}`;
+  const session = sessions.get(key);
+  if (session) {
+    persistSessionSummary(session);
+  }
   return sessions.delete(key);
 }
 
@@ -800,6 +870,7 @@ module.exports = {
   applyDecay,
   accumulateRisk,
   refreshSessionBaselineAfterReauth,
+  getSessionTimeoutInfo,
   isSessionReauthenticationRequired: (req) =>
     Boolean(getSessionStatus(req)?.requiresReauthentication),
   // Step-up MFA helpers

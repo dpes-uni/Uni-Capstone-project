@@ -1,11 +1,15 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const RefreshToken = require('../models/RefreshToken');
 const {
   getSessionStatus,
   consumeStepUpVerification,
   clearStepUpVerification,
   isSessionReauthenticationRequired,
+  getSessionTimeoutInfo,
+  clearSessionByUserId,
 } = require('../services/sessionMonitor');
+const logger = require('../utils/logger');
 
 function getRequestToken(req) {
   const authHeader = req?.headers?.authorization;
@@ -60,6 +64,29 @@ async function protect(req, res, next) {
     const sessionStatus = getSessionStatus(req);
 
     if (sessionStatus?.requiresReauthentication) {
+      const sessionTimeout = getSessionTimeoutInfo(req);
+
+      // 30-second grace period expired — force terminate the session.
+      // Revoke the refresh token server-side so even the /auth/refresh
+      // endpoint cannot extend the session.
+      if (sessionTimeout?.highRiskTerminate) {
+        logger.warn('Session force-terminated: high-risk grace period expired', {
+          user: req.user.email,
+        });
+
+        await RefreshToken.updateMany(
+          { user: req.user._id, revoked: false },
+          { $set: { revoked: true, revokedAt: new Date() } }
+        );
+
+        clearSessionByUserId(req.user._id);
+
+        return res.status(401).json({
+          message: 'Session terminated due to suspicious activity',
+          sessionTerminated: true,
+        });
+      }
+
       return res.status(403).json({
         message: 'Session requires re-authentication',
         reauthenticationRequired: true,

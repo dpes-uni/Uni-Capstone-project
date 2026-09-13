@@ -1,6 +1,37 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import api from '../api/axios.js';
 import RiskBadge from '../components/RiskBadge.jsx';
+
+// DEBUG: Remove before submission
+function DebugPanel() {
+  const [msg, setMsg] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const triggerRisk = useCallback(async () => {
+    setLoading(true);
+    setMsg('');
+    try {
+      const { data } = await api.post('/debug/trigger-session-risk');
+      setMsg(data.message || 'Session flagged.');
+    } catch (err) {
+      setMsg(err.response?.data?.message || 'Failed to trigger risk.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return (
+    <section className="panel" style={{ border: '2px dashed #e74c3c', background: '#fdf2f2' }}>
+      <h2 style={{ color: '#e74c3c' }}>Debug: Session Risk Trigger</h2>
+      <p>Click the button below to manually flag your session as high-risk. The termination popup will appear on the next API call, and the session will be terminated after 30 seconds.</p>
+      <button className="btn-primary" onClick={triggerRisk} disabled={loading}>
+        {loading ? 'Flagging…' : 'Simulate High-Risk Session'}
+      </button>
+      {msg && <p style={{ marginTop: '0.75rem', fontWeight: 600 }}>{msg}</p>}
+    </section>
+  );
+}
+// END DEBUG
 
 export default function Dashboard() {
   const [summary, setSummary] = useState(null);
@@ -99,6 +130,12 @@ export default function Dashboard() {
           <dd>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : '—'}</dd>
         </dl>
       </section>
+
+      {/* DEBUG: Remove before submission */}
+      {import.meta.env.DEV && (
+        <DebugPanel />
+      )}
+      {/* END DEBUG */}
     </div>
   );
 }

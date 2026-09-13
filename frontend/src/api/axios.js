@@ -63,6 +63,17 @@ api.interceptors.response.use(
     const status = response ? response.status : null;
     const body = response?.data || {};
 
+    // Backend force-terminated the session (high-risk grace period expired).
+    // Clear everything and force a reload to the login page.
+    // This check MUST come before the token refresh logic — a terminated
+    // session cannot be recovered by refreshing the access token because
+    // the refresh token has already been revoked server-side.
+    if (status === 401 && response?.data?.sessionTerminated) {
+      localStorage.removeItem('ad_token');
+      window.dispatchEvent(new Event('ad:force-logout'));
+      return Promise.reject(error);
+    }
+
     // ── 401: Token expired — attempt a single refresh. ──────────────────────
     if (status === 401 && !config.__isRetry) {
       config.__isRetry = true;
