@@ -1,0 +1,13 @@
+user_id,username,full_name,user_role,organisation,country,city,normal_device,normal_browser,normal_operating_system,usual_login_start_hour,usual_login_end_hour,trusted_vpn_user,average_daily_logins,trusted_ip_prefix
+
+
+USR001,student1@example.com,Emily Carter,Student,Individual,Australia,Melbourne,Windows Laptop,Microsoft Edge,Windows 11,7,22,False,2,203.15.
+USR002,student2@example.com,James Wilson,Student,Individual,Australia,Sydney,MacBook,Safari,macOS,8,23,False,3,203.16.
+USR003,student3@example.com,Olivia Brown,Student,Individual,Australia,Brisbane,Windows Laptop,Google Chrome,Windows 11,7,21,False,2,203.17.
+USR004,agent1@example.com,Michael Taylor,Agent,Global Education Agency,Australia,Melbourne,Windows Laptop,Google Chrome,Windows 11,8,18,True,20,101.44.
+USR005,agent2@example.com,Sophia Martin,Agent,Study Abroad Australia,Australia,Perth,MacBook,Google Chrome,macOS,8,18,True,18,101.45.
+USR006,agent3@example.com,Daniel White,Agent,Future Pathways,Australia,Sydney,Windows Laptop,Microsoft Edge,Windows 11,8,18,True,22,101.46.
+USR007,institution1@example.com,University of Melbourne,Institution,University of Melbourne,Australia,Melbourne,Windows Desktop,Microsoft Edge,Windows 11,8,17,False,50,172.20.
+USR008,institution2@example.com,Monash University,Institution,Monash University,Australia,Melbourne,Windows Desktop,Google Chrome,Windows 11,8,17,False,45,172.21.
+USR009,institution3@example.com,RMIT University,Institution,RMIT University,Australia,Melbourne,Windows Desktop,Microsoft Edge,Windows 11,8,17,False,48,172.22.
+USR010,student4@example.com,Liam Harris,Student,Individual,Australia,Adelaide,Linux Laptop,Firefox,Ubuntu 24.04,7,22,False,2,203.18.
