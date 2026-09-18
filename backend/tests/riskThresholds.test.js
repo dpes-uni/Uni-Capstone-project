@@ -72,7 +72,7 @@ describe('Section 2 — adaptive risk thresholds', () => {
     const res = await sessionMonitor.recordSessionEvent(mockReq(), 'document_viewed');
 
     expect(res.requiresReauthentication).toBe(false);
-    expect(res.riskDecision).toBe('continue');
+    expect(res.riskDecision).toBe('monitor');
   });
 
   test('high risk → require re-authentication', async () => {

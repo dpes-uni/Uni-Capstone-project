@@ -181,14 +181,14 @@ describe('Session risk-state consistency — effective risk reflected in enforce
     expect(status.requiresReauthentication).toBe(false);
   });
 
-  test('(d) effective medium risk continues normally without reauth', async () => {
+  test('(d) effective medium risk enters Monitor without reauth', async () => {
     setRisk(mockMediumRisk());
 
     const req = mockReq();
     const res = await sessionMonitor.recordSessionEvent(req, 'document_viewed');
 
     expect(res.requiresReauthentication).toBe(false);
-    expect(res.riskDecision).toBe('continue');
+    expect(res.riskDecision).toBe('monitor');
 
     const status = sessionMonitor.getSessionStatus(req);
     expect(status.riskLevel).toBe('medium');

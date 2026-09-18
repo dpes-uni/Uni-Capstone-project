@@ -1,4 +1,5 @@
 const aiService = require('./aiService');
+const { getActionHighThreshold } = require('../utils/actionThresholds');
 const logger = require('../utils/logger');
 const { hashToken, getClientIp } = require('../utils/generateToken');
 const { getIpGeolocation, detectVpn } = require('./ipService');
@@ -33,6 +34,13 @@ const STEP_UP_VERIFY_WINDOW_MS = Number(
 // Session timeout tracking.
 const SESSION_IDLE_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes of inactivity
 const HIGH_RISK_TERMINATE_TIMEOUT_MS = 30 * 1000; // 30 seconds before forced termination
+
+// Re-authentication cooldown after successful re-auth.
+// During cooldown, moderate anomalies remain Monitor (no immediate MFA).
+// Critical/high-severity conditions override cooldown.
+const REAUTH_COOLDOWN_MS = Number(
+  process.env.REAUTH_COOLDOWN_MS ?? 5 * 60 * 1000
+);
 
 function getRequestToken(req) {
   const authHeader = req?.headers?.authorization;
@@ -82,8 +90,19 @@ function getSessionStatus(req) {
   const session = sessions.get(key);
   if (session) {
     applyDecay(session);
+    // Expire any elapsed cooldown so subsequent requests
+    // resume normal re-authentication decisions.
+    if (session.reauthCooldownUntil && Date.now() >= session.reauthCooldownUntil) {
+      session.reauthCooldownUntil = null;
+    }
   }
   return session || null;
+}
+
+function isInReauthCooldown(session) {
+  return Boolean(
+    session && session.reauthCooldownUntil && Date.now() < session.reauthCooldownUntil
+  );
 }
 
 function getRiskScore(riskResult) {
@@ -96,7 +115,8 @@ function getRiskLevel(riskResult) {
 }
 
 // Determine session risk from the AI result using configured thresholds.
-function classifySessionRisk(riskResult) {
+// Action-sensitive actions use a stricter threshold (see actionThresholds.js).
+function classifySessionRisk(riskResult, actionType) {
   if (!riskResult || typeof riskResult !== 'object') {
     return 'low';
   }
@@ -104,13 +124,17 @@ function classifySessionRisk(riskResult) {
   const score = getRiskScore(riskResult);
   const level = getRiskLevel(riskResult);
 
+  // Action-specific threshold: sensitive actions use a stricter threshold.
+  const highThreshold = getActionHighThreshold(actionType);
+
   // Critical — strongest response.
   if (level === 'critical' || score >= RISK_CRITICAL_THRESHOLD) {
     return 'critical';
   }
 
   // High — require re-authentication.
-  if (level === 'high' || score >= RISK_HIGH_THRESHOLD) {
+  // Uses action-specific threshold (stricter for sensitive actions).
+  if (level === 'high' || score >= highThreshold) {
     return 'high';
   }
 
@@ -188,10 +212,11 @@ function applyDecay(session) {
 }
 
 // Accumulate suspicious risk contribution from a new event.
+// actionType determines the threshold for what counts as "suspicious".
 // Returns the updated accumulated risk value.
-function accumulateRisk(session, riskResult) {
+function accumulateRisk(session, riskResult, actionType) {
   applyDecay(session);
-  const riskClass = classifySessionRisk(riskResult);
+  const riskClass = classifySessionRisk(riskResult, actionType);
   if (riskClass === 'low' || session.requiresReauthentication) {
     return session.accumulatedRisk || 0;
   }
@@ -201,7 +226,7 @@ function accumulateRisk(session, riskResult) {
   return session.accumulatedRisk;
 }
 
-function updateSessionRiskState(session, riskResult) {
+function updateSessionRiskState(session, riskResult, actionType) {
   session.lastRiskCheckedAt = new Date();
   session.lastRiskResult = riskResult || null;
 
@@ -213,9 +238,9 @@ function updateSessionRiskState(session, riskResult) {
   }
 
   // Accumulate from suspicious events (preserves AI result above).
-  accumulateRisk(session, riskResult);
+  accumulateRisk(session, riskResult, actionType);
 
-  const aiClass = classifySessionRisk(riskResult);
+  const aiClass = classifySessionRisk(riskResult, actionType);
   const accumulatedClass = classifyAccumulatedRisk(session.accumulatedRisk || 0);
 
   // Highest class between AI and accumulated risk wins.
@@ -236,7 +261,9 @@ function updateSessionRiskState(session, riskResult) {
     session.riskDecision = 'reauth_required';
   } else if (!session.requiresReauthentication) {
     session.requiresReauthentication = false;
-    session.riskDecision = 'continue';
+    // Moderate risk → Monitor (session active, elevated, no MFA).
+    // Low risk → Continue (normal activity).
+    session.riskDecision = finalClass === 'medium' ? 'monitor' : 'continue';
   }
 
   return session.requiresReauthentication;
@@ -259,6 +286,7 @@ function clearSessionReauthentication(req) {
   session.failedActions = 0;
   session.accumulatedRisk = 0;
   session.accumulatedRiskUpdatedAt = null;
+  session.reauthCooldownUntil = null;
 
   return true;
 }
@@ -300,6 +328,7 @@ function getOrCreateSession(req) {
       accumulatedRisk: 0,
       accumulatedRiskUpdatedAt: null,
       riskLevel: 'low',
+      reauthCooldownUntil: null,
 
       // Security baseline captured at session start (for context-change detection).
       // Populated asynchronously by establishSessionBaseline().
@@ -503,12 +532,13 @@ async function recordSessionEvent(
     const requiresReauthentication =
       updateSessionRiskState(
         session,
-        riskResult
+        riskResult,
+        eventType
       );
 
     // Record threshold + re-auth events only on the transition edge.
     if (!wasAlreadyReauthRequired && requiresReauthentication) {
-      const aiClass = classifySessionRisk(riskResult);
+      const aiClass = classifySessionRisk(riskResult, eventType);
       if (aiClass === 'high' || aiClass === 'critical') {
         recordSecurityEvent({
           user: session.userId,
@@ -752,8 +782,9 @@ function clearSessionByUserId(userId) {
 }
 
 // Refresh the trusted baseline after a successful re-authentication.
-// Captures the current verified context, resets risk state, and installs
-// the captured context as the new baseline. No-op if no session exists.
+// Captures the current verified context, resets risk state, installs
+// the captured context as the new baseline, and starts the re-authentication
+// cooldown. No-op if no session exists.
 async function refreshSessionBaselineAfterReauth(req) {
   const key = getSessionKey(req);
   if (!key) return false;
@@ -764,6 +795,8 @@ async function refreshSessionBaselineAfterReauth(req) {
   const verifiedContext = await captureSessionContext(req);
   const previousBaseline = session.securityBaseline;
   clearSessionReauthentication(req);
+  // Start the cooldown: moderate anomalies remain Monitor.
+  session.reauthCooldownUntil = Date.now() + REAUTH_COOLDOWN_MS;
   session.securityBaseline = verifiedContext;
 
   // Record successful re-authentication.
@@ -863,6 +896,7 @@ module.exports = {
   clearSessionByUserId,
   clearSessionReauthentication,
   getSessionStatus,
+  isInReauthCooldown,
   establishSessionBaseline,
   captureSessionContext,
   compareSessionContext,
@@ -885,4 +919,5 @@ module.exports = {
   isStepUpVerificationValid,
   isStepUpVerificationRequired,
   STEP_UP_VERIFY_WINDOW_MS,
+  REAUTH_COOLDOWN_MS,
 };

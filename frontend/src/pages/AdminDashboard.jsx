@@ -206,6 +206,19 @@ export default function AdminDashboard() {
         </table>
       </section>
 
+      {import.meta.env.DEV && (
+        <section className="panel">
+          <h2>AI Security Demo</h2>
+          <p>Open the development-only AI security monitoring dashboard.</p>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => window.open('/admin/ai-demo', '_blank', 'noopener,noreferrer')}
+          >
+            AI Security Demo
+          </button>
+        </section>
+      )}
+
       <section className="panel">
         <h2>Recent authentication activity</h2>
         <table className="table">

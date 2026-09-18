@@ -5,6 +5,7 @@ const { protect, stepUpProtect } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roles');
 const {
   getOverview,
+  getSessionStatus,
   updateUserRole,
   listAssessments,
   getAssessmentDocument,
@@ -15,6 +16,7 @@ const router = express.Router();
 router.use(protect, requireRole('admin'));
 
 router.get('/overview', getOverview);
+router.get('/session-status', getSessionStatus);
 router.patch(
   '/users/:id/role',
   stepUpProtect,

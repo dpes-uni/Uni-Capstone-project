@@ -13,6 +13,7 @@ import AdminSignup from './pages/AdminSignup.jsx';
 import AdminSignupVerify from './pages/AdminSignupVerify.jsx';
 import ClientDashboard from './pages/ClientDashboard.jsx';
 import AdminDashboard from './pages/AdminDashboard.jsx';
+import AIDemoPage from './pages/AIDemoPage.jsx';
 import Signup from './pages/Signup.jsx';
 import VerifyEmail from './pages/VerifyEmail.jsx';
 import MfaVerify from './pages/MfaVerify.jsx';
@@ -59,6 +60,16 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+          {import.meta.env.DEV && (
+            <Route
+              path="/admin/ai-demo"
+              element={
+                <ProtectedRoute roles={['admin']}>
+                  <AIDemoPage />
+                </ProtectedRoute>
+              }
+            />
+          )}
           <Route
             path="/assessments"
             element={

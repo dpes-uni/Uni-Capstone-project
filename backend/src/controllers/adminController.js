@@ -4,6 +4,59 @@ const User = require('../models/User');
 const LoginActivity = require('../models/LoginActivity');
 const Assessment = require('../models/Assessment');
 const { UPLOAD_DIR } = require('../middleware/upload');
+const { getSessionTimeoutInfo } = require('../services/sessionMonitor');
+
+async function getSessionStatus(req, res, next) {
+  try {
+    const sessionMonitor = require('../services/sessionMonitor');
+    const session = sessionMonitor.getSessionStatus(req);
+
+    if (!session) {
+      return res.json({ active: false });
+    }
+
+    const timeoutInfo = getSessionTimeoutInfo(req);
+
+    res.json({
+      active: true,
+      user: {
+        username: session.username || null,
+        role: session.userRole || null,
+      },
+      startedAt: session.startedAt || null,
+      sessionStatus: {
+        active: true,
+        requiresReauthentication: session.requiresReauthentication || false,
+        riskDecision: session.riskDecision || 'unknown',
+        recommendedAction: session.recommendedAction || null,
+      },
+      aiRisk: {
+        score: session.lastRiskResult?.risk_score ?? null,
+        level: session.lastRiskResult?.risk_level || session.riskLevel || null,
+      },
+      accumulatedRisk: session.accumulatedRisk ?? 0,
+      effectiveRiskLevel: session.riskLevel || 'low',
+      timeout: {
+        idleTimeout: timeoutInfo.idleTimeout,
+        highRiskTerminate: timeoutInfo.highRiskTerminate,
+        timeUntilExpire: timeoutInfo.timeUntilExpire,
+      },
+      baseline: session.securityBaseline || null,
+      sessionContext: null,
+      contextChanges: null,
+      activity: {
+        documentsViewed: session.documentsViewed || 0,
+        documentsDownloaded: session.documentsDownloaded || 0,
+        documentsUploaded: session.documentsUploaded || 0,
+        verificationActions: session.verificationActions || 0,
+        failedActions: session.failedActions || 0,
+        rapidActions: session.actionTimestamps?.length >= 5 || false,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
 
 async function getOverview(req, res, next) {
   try {
@@ -123,6 +176,7 @@ async function reviewAssessment(req, res, next) {
 
 module.exports = {
   getOverview,
+  getSessionStatus,
   updateUserRole,
   listAssessments,
   getAssessmentDocument,

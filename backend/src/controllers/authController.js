@@ -17,6 +17,9 @@ const {
   STEP_UP_VERIFY_WINDOW_MS,
 } = require('../services/sessionMonitor');
 const {
+  computeSessionContextFeatures,
+} = require('../utils/sessionContextFeatures');
+const {
   generateAuthToken,
   generateRandomToken,
   hashToken,
@@ -388,6 +391,26 @@ async function login(req, res, next) {
       success: false, // becomes true once the session is actually issued
     });
 
+    // Compute session-login context features from real application data.
+    // These are derived from existing DB records — no random values are generated.
+    const computedFeatures = await computeSessionContextFeatures({
+      user,
+      deviceHash,
+      currentGeo: activityGeo,
+    });
+
+    // Store the computed features on the activity record for later inspection.
+    if (computedFeatures.device_seen_before !== undefined) {
+      // We don't have a deviceSeenBefore field on the schema, but we keep
+      // the data on the document in a flexible way for audit purposes.
+      activity.deviceSeenBefore = computedFeatures.device_seen_before;
+    }
+    activity.timeSinceLastLoginMs = computedFeatures.time_since_last_login;
+    activity.distanceFromLastKm = computedFeatures.distance_from_last_location;
+    activity.recentFailedLoginsCount = computedFeatures.number_of_recent_failed_logins;
+    activity.successfulMfaHistoryCount = computedFeatures.successful_mfa_history;
+    await activity.save();
+
     // OTP is mandatory for EVERY successful sign-in, regardless of risk level.
     // Do not issue a session token until the email OTP is verified.
     user.failedLoginAttempts = 0;
@@ -430,6 +453,8 @@ async function login(req, res, next) {
         reasons: finalRisk.reasons,
         aiAssessment: aiRisk.score > 0 ? aiRisk : null, // AI data when the service responded
       },
+      // Session-login context features computed from real application data.
+      contextFeatures: computedFeatures,
     });
   } catch (err) {
     next(err);
@@ -485,13 +510,36 @@ async function verifyMfa(req, res, next) {
     setAuthCookie(res, token);
     await issueRefreshToken(res, user._id, { req });
 
+    // Compute session-login context features at the moment the new session is
+    // fully established. The device has just been added to trustedDevices above,
+    // so device_seen_before will now return true for this exact device.
+    const computedContextFeatures = await computeSessionContextFeatures({
+      user,
+      deviceHash: otpDoc.deviceHash,
+      currentGeo: {
+        latitude: otpDoc.loginActivity?.latitude || null,
+        longitude: otpDoc.loginActivity?.longitude || null,
+      },
+    });
+
     // Establish the security baseline for the new session.
     await establishSessionBaseline(req);
+
+    const contextFeatures = {
+      device_seen_before: computedContextFeatures.device_seen_before,
+      time_since_last_login: computedContextFeatures.time_since_last_login,
+      user_typical_login_hour: computedContextFeatures.user_typical_login_hour,
+      time_since_previous_session: computedContextFeatures.time_since_previous_session,
+      distance_from_last_location: computedContextFeatures.distance_from_last_location,
+      number_of_recent_failed_logins: computedContextFeatures.number_of_recent_failed_logins,
+      successful_mfa_history: computedContextFeatures.successful_mfa_history,
+    };
 
     return res.json({
       message: 'Verification successful, login complete.',
       token,
       user: user.toSafeObject(),
+      contextFeatures,
     });
   } catch (err) {
     next(err);
