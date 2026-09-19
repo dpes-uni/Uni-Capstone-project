@@ -9,6 +9,21 @@ const loginActivitySchema = new mongoose.Schema(
     isNewDevice: { type: Boolean, default: false },
     isNewIp: { type: Boolean, default: false },
 
+    // ---------------------------------------------------------------
+    // Session context features — login-decision snapshot.
+    // Persisted at initial login (pre-MFA) and NOT recomputed after
+    // successful MFA, so this record retains the state that drove the
+    // login-decision snapshot. See authController.login().
+    // deviceSeenBefore, timeSinceLastLoginMs, distanceFromLastKm,
+    // recentFailedLoginsCount, successfulMfaHistoryCount — all null
+    // unless explicitly populated by authController before save.
+    // ---------------------------------------------------------------
+    deviceSeenBefore: { type: Boolean, default: null },
+    timeSinceLastLoginMs: { type: Number, default: null },
+    distanceFromLastKm: { type: Number, default: null },
+    recentFailedLoginsCount: { type: Number, default: null },
+    successfulMfaHistoryCount: { type: Number, default: null },
+
     // Geolocation of the attempt, used for impossible-travel detection.
     country: { type: String, default: 'Unknown' },
     city: { type: String, default: 'Unknown' },
