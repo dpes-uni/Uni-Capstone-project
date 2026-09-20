@@ -53,8 +53,8 @@ export default function AIDemoPage() {
   const [sessionData, setSessionData] = useState(null);
   const [error, setError] = useState(null);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     setError(null);
     try {
       const { data } = await api.get('/admin/session-status');
@@ -62,12 +62,22 @@ export default function AIDemoPage() {
     } catch (err) {
       setError(err?.response?.data?.message || 'Failed to load session status.');
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     loadData();
+  }, [loadData]);
+
+  // Poll the monitored session so the administrator dashboard reflects
+  // activity from the student/other non-admin browser without manual refresh.
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      loadData(false);
+    }, 3000);
+
+    return () => window.clearInterval(intervalId);
   }, [loadData]);
 
   const active = sessionData?.active === true;
@@ -91,7 +101,7 @@ export default function AIDemoPage() {
   const noSessionContent = (
     <section className="panel">
       <h2>No Active Session</h2>
-      <p>No authenticated session is available. Start a session and sign in as an administrator to view live security data.</p>
+      <p>No authenticated session is available. Start a student or other non-admin session to view live security data here.</p>
     </section>
   );
 
@@ -124,7 +134,7 @@ export default function AIDemoPage() {
     <div className="page dashboard-page">
       <header className="page-header">
         <h1>AI Security Demo</h1>
-        <p>Live session data from the authenticated backend. DATA MODE: LIVE SESSION.</p>
+        <p>Live monitored session data from the backend. DATA MODE: LIVE SESSION.</p>
       </header>
       <div className="alert alert-info" data-testid="data-mode">DATA MODE: LIVE SESSION</div>
       <div role="tablist" aria-label="AI Security Demo tabs" style={{ display: 'flex', gap: '6px', marginBottom: '20px' }}>
