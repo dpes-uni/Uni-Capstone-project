@@ -9,13 +9,26 @@ const { getSessionTimeoutInfo } = require('../services/sessionMonitor');
 async function getSessionStatus(req, res, next) {
   try {
     const sessionMonitor = require('../services/sessionMonitor');
-    const session = sessionMonitor.getSessionStatus(req);
+
+    // The admin dashboard monitors the latest active non-admin session.
+    // The administrator's own session is not the session being evaluated.
+    const monitoredSessions = Array.from(sessionMonitor.sessions.values())
+      .filter((candidate) => candidate.userRole !== 'admin')
+      .sort((a, b) => Number(b.startedAt || 0) - Number(a.startedAt || 0));
+
+    const session = monitoredSessions[0] || null;
 
     if (!session) {
       return res.json({ active: false });
     }
 
-    const timeoutInfo = getSessionTimeoutInfo(req);
+    // Reuse the existing timeout calculation against the monitored user's
+    // session rather than the administrator's request session.
+    const monitoredRequest = {
+      ...req,
+      user: { _id: session.userId },
+    };
+    const timeoutInfo = getSessionTimeoutInfo(monitoredRequest);
 
     res.json({
       active: true,
