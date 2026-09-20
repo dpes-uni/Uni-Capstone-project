@@ -67,7 +67,7 @@ const seedSession = (userId, data = {}) => {
   sessionMonitor.sessions.set(key, {
     userId,
     username: 'test.admin@university.edu',
-    userRole: 'admin',
+    userRole: data.userRole || 'admin',
     startedAt: new Date(Date.now() - 23 * 60000).toISOString(),
     lastActivity: Date.now(),
     documentsViewed: 5,
@@ -127,15 +127,22 @@ describe('GET /api/admin/session-status', () => {
 
   // --- 3 & 4: Active session from live data ---
 
-  test('authenticated admin with active session receives live session data', async () => {
+  test('authenticated admin receives the latest active non-admin session', async () => {
     seedSession(ADMIN_USER._id);
+    seedSession(STUDENT_USER._id, {
+      userRole: 'student',
+      username: 'student@test.com',
+      startedAt: new Date(Date.now() - 2 * 60000).toISOString(),
+    });
+
     const res = await request(app)
       .get('/api/admin/session-status')
       .set('x-test-user', JSON.stringify(ADMIN_USER));
+
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('active', true);
-    expect(res.body).toHaveProperty('user');
-    expect(res.body.user).toHaveProperty('username');
+    expect(res.body.user.username).toBe('student@test.com');
+    expect(res.body.user.role).toBe('student');
     expect(res.body).toHaveProperty('sessionStatus');
     expect(res.body).toHaveProperty('aiRisk');
     expect(res.body).toHaveProperty('accumulatedRisk');
@@ -145,8 +152,8 @@ describe('GET /api/admin/session-status', () => {
     expect(res.body).toHaveProperty('activity');
   });
 
-  test('active session contains expected live fields', async () => {
-    seedSession(ADMIN_USER._id);
+  test('active monitored session contains expected live fields', async () => {
+    seedSession(STUDENT_USER._id, { userRole: 'student' });
     const res = await request(app)
       .get('/api/admin/session-status')
       .set('x-test-user', JSON.stringify(ADMIN_USER));
@@ -172,9 +179,19 @@ describe('GET /api/admin/session-status', () => {
     expect(body.activity).toHaveProperty('rapidActions');
   });
 
-  // --- 5: No active session ---
+  test('admin session alone is not treated as monitored session', async () => {
+    seedSession(ADMIN_USER._id);
+    const res = await request(app)
+      .get('/api/admin/session-status')
+      .set('x-test-user', JSON.stringify(ADMIN_USER));
 
-  test('no active session returns { active: false }', async () => {
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ active: false });
+  });
+
+  // --- 5: No monitored non-admin session ---
+
+  test('no monitored session returns { active: false }', async () => {
     const res = await request(app)
       .get('/api/admin/session-status')
       .set('x-test-user', JSON.stringify(ADMIN_USER));
@@ -185,7 +202,7 @@ describe('GET /api/admin/session-status', () => {
   // --- 6: Secrets not returned ---
 
   test('does not return sensitive secrets', async () => {
-    seedSession(ADMIN_USER._id);
+    seedSession(STUDENT_USER._id, { userRole: 'student' });
     const res = await request(app)
       .get('/api/admin/session-status')
       .set('x-test-user', JSON.stringify(ADMIN_USER));
@@ -203,7 +220,7 @@ describe('GET /api/admin/session-status', () => {
   // --- 7: Unavailable fields not fabricated ---
 
   test('unavailable fields are null or 0 or false, never fabricated', async () => {
-    seedSession(ADMIN_USER._id);
+    seedSession(STUDENT_USER._id, { userRole: 'student' });
     const res = await request(app)
       .get('/api/admin/session-status')
       .set('x-test-user', JSON.stringify(ADMIN_USER));
