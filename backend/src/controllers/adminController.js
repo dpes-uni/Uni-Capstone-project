@@ -14,7 +14,7 @@ async function getSessionStatus(req, res, next) {
     // The administrator's own session is not the session being evaluated.
     const monitoredSessions = Array.from(sessionMonitor.sessions.values())
       .filter((candidate) => candidate.userRole !== 'admin')
-      .sort((a, b) => Number(b.startedAt || 0) - Number(a.startedAt || 0));
+      .sort((a, b) => new Date(b.startedAt || 0).getTime() - new Date(a.startedAt || 0).getTime());
 
     const session = monitoredSessions[0] || null;
 
