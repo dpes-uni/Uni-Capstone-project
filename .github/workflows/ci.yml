@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+        working-directory: .
+      - run: npm test
+
+  frontend:
+    name: Frontend tests & build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+        working-directory: .
+      - run: npm test
+      - run: npm run build
+
+  ai-service:
+    name: AI service smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: ai/requirements.txt
+      - run: pip install -r requirements.txt
+        working-directory: ai
+      - name: Start API and hit /health + /predict
+        working-directory: ai
+        run: |
+          python src/api.py &
+          sleep 8
+          curl -sf http://localhost:8000/health
+          curl -sf -X POST http://localhost:8000/predict \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"ci@test.dev","device":"Desktop","browser":"Chrome","operating_system":"Linux","ip_address":"203.0.113.1","country":"Unknown","city":"Unknown","login_hour":14,"failed_login_attempts":0,"new_device":true,"vpn_detected":false,"trusted_device":false,"trusted_location":false}'

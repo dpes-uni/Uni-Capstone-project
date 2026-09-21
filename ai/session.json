@@ -1,0 +1,12 @@
+{
+    "username": "student1@example.com",
+    "user_role": "Student",
+    "session_duration_minutes": 240,
+    "documents_viewed": 40,
+    "documents_downloaded": 15,
+    "documents_uploaded": 8,
+    "verification_actions": 20,
+    "failed_actions": 5,
+    "rapid_actions": true,
+    "unusual_activity": false
+}

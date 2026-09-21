@@ -1,0 +1,43 @@
+{
+  "dataset": "C:\\Users\\Deepesh_x\\Downloads\\events_corrected.csv",
+  "ai_url": "http://127.0.0.1:8000/predict",
+  "random_seed": 20260830,
+  "cases_tested": 20,
+  "counts": {
+    "PASS": 11,
+    "FAIL": 9,
+    "API_ERROR": 0
+  },
+  "risk_level_distribution_overall": {
+    "High": 5,
+    "Low": 15
+  },
+  "risk_level_by_external_label": {
+    "TRUE": {
+      "High": 3,
+      "Low": 7
+    },
+    "FALSE": {
+      "Low": 8,
+      "High": 2
+    }
+  },
+  "field_mapping": {
+    "country": "country_of_authentication1",
+    "failed_login_attempts": "number_failed_logins1 (100+ capped to 100)",
+    "vpn_detected": "vpn_confidence >= 50%",
+    "controlled_values_NOT_from_dataset": [
+      "device",
+      "browser",
+      "operating_system",
+      "ip_address",
+      "city",
+      "login_hour",
+      "new_device",
+      "trusted_device",
+      "trusted_location",
+      "username"
+    ]
+  },
+  "verdict_rule": "External TRUE alarm should produce Medium/High risk; External FALSE alarm should NOT produce High risk. External label is NOT equated with Low/Medium/High."
+}
