@@ -1,3 +1,4 @@
+
 /**
  * Focused persistence test for the five session-context fields on LoginActivity.
  *
@@ -28,7 +29,10 @@ beforeEach(async () => {
 
 describe('LoginActivity five context-feature fields', () => {
   test('all five values assigned by login() persist through save + retrieve', async () => {
+    const testUserId = new mongoose.Types.ObjectId();
+
     const doc = new LoginActivity({
+      user: testUserId,
       deviceSeenBefore: true,
       timeSinceLastLoginMs: 42000,
       distanceFromLastKm: 12.5,
@@ -39,6 +43,7 @@ describe('LoginActivity five context-feature fields', () => {
     const saved = await doc.save();
     const retrieved = await LoginActivity.findById(saved._id);
 
+    expect(retrieved.user.toString()).toBe(testUserId.toString());
     expect(retrieved.deviceSeenBefore).toBe(true);
     expect(retrieved.timeSinceLastLoginMs).toBe(42000);
     expect(retrieved.distanceFromLastKm).toBe(12.5);
@@ -47,10 +52,16 @@ describe('LoginActivity five context-feature fields', () => {
   });
 
   test('new document without the fields gets null defaults', async () => {
-    const doc = new LoginActivity({});
+    const testUserId = new mongoose.Types.ObjectId();
+
+    const doc = new LoginActivity({
+      user: testUserId,
+    });
+
     const saved = await doc.save();
     const retrieved = await LoginActivity.findById(saved._id);
 
+    expect(retrieved.user.toString()).toBe(testUserId.toString());
     expect(retrieved.deviceSeenBefore).toBeNull();
     expect(retrieved.timeSinceLastLoginMs).toBeNull();
     expect(retrieved.distanceFromLastKm).toBeNull();
