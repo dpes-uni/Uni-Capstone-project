@@ -377,6 +377,23 @@ function getOrCreateSession(req) {
       // Security baseline captured at session start (for context-change detection).
       // Populated asynchronously by establishSessionBaseline().
       securityBaseline: null,
+
+      // The most recently observed authenticated request context. Populated
+      // by establishSessionBaseline() at session start and updated by
+      // recordSessionEvent() on every monitored event.
+      currentSessionContext: null,
+
+      // Comparison between the session security baseline and the current
+      // context. Starts with all flags false because a new session begins
+      // with no context change (baseline and current context are identical).
+      contextChanges: {
+        deviceChanged: false,
+        browserChanged: false,
+        osChanged: false,
+        ipChanged: false,
+        locationChanged: false,
+        vpnChanged: false,
+      },
     };
 
     sessions.set(key, session);
@@ -523,6 +540,11 @@ async function recordSessionEvent(
     session.securityBaseline,
     currentContext
   );
+
+  // Persist the already-computed real values on the in-memory session so
+  // other endpoints (e.g. /api/admin/session-status) can read them.
+  session.currentSessionContext = currentContext;
+  session.contextChanges = contextChanges;
 
   // Record meaningful context change.
   if (hasMeaningfulContextChange(contextChanges)) {
@@ -824,7 +846,18 @@ async function establishSessionBaseline(req) {
   const session = sessions.get(key);
   if (!session) return;
 
-  session.securityBaseline = await captureSessionContext(req);
+  const context = await captureSessionContext(req);
+
+  session.securityBaseline = context;
+  session.currentSessionContext = context;
+  session.contextChanges = {
+    deviceChanged: false,
+    browserChanged: false,
+    osChanged: false,
+    ipChanged: false,
+    locationChanged: false,
+    vpnChanged: false,
+  };
 }
 
 /**

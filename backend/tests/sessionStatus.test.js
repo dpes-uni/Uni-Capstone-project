@@ -209,6 +209,7 @@ describe('GET /api/admin/session-status', () => {
       .set('x-test-user', JSON.stringify(ADMIN_USER));
     const body = res.body;
 
+    // No current context / context changes have been observed on this session.
     expect(body.sessionContext).toBeNull();
     expect(body.contextChanges).toBeNull();
 
@@ -220,5 +221,95 @@ describe('GET /api/admin/session-status', () => {
     expect(body.user.role === null || typeof body.user.role === 'string').toBe(true);
 
     expect(body.baseline === null || typeof body.baseline === 'object').toBe(true);
+  });
+
+  // --- 8: Live context data is exposed, not replaced with null ---
+
+  test('returns the live session context and context changes when present', async () => {
+    const contextData = {
+      currentSessionContext: {
+        device: 'Mobile',
+        browser: 'Safari',
+        operatingSystem: 'iOS',
+        ip: '10.0.0.7',
+        country: 'United Kingdom',
+        city: 'London',
+        vpnDetected: true,
+        loginAt: Date.now(),
+      },
+      contextChanges: {
+        deviceChanged: true,
+        browserChanged: true,
+        osChanged: true,
+        ipChanged: true,
+        locationChanged: true,
+        vpnChanged: true,
+      },
+    };
+
+    seedSession(ADMIN_USER._id, contextData);
+    const res = await request(app)
+      .get('/api/admin/session-status')
+      .set('x-test-user', JSON.stringify(ADMIN_USER));
+    const body = res.body;
+
+    expect(body.baseline).not.toBeNull();
+    expect(body.sessionContext).not.toBeNull();
+    expect(body.contextChanges).not.toBeNull();
+
+    // The endpoint must not replace real supplied context data with null.
+    expect(body.sessionContext.device).toBe('Mobile');
+    expect(body.sessionContext.browser).toBe('Safari');
+    expect(body.sessionContext.operatingSystem).toBe('iOS');
+    expect(body.sessionContext.ip).toBe('10.0.0.7');
+    expect(body.sessionContext.country).toBe('United Kingdom');
+    expect(body.sessionContext.city).toBe('London');
+    expect(body.sessionContext.vpnDetected).toBe(true);
+
+    expect(body.contextChanges).toHaveProperty('deviceChanged');
+    expect(body.contextChanges).toHaveProperty('browserChanged');
+    expect(body.contextChanges).toHaveProperty('osChanged');
+    expect(body.contextChanges).toHaveProperty('ipChanged');
+    expect(body.contextChanges).toHaveProperty('locationChanged');
+    expect(body.contextChanges).toHaveProperty('vpnChanged');
+    expect(body.contextChanges.deviceChanged).toBe(true);
+    expect(body.contextChanges.vpnChanged).toBe(true);
+  });
+
+  test('returns the real zeroed context-change flags after session initialization', async () => {
+    seedSession(ADMIN_USER._id, {
+      currentSessionContext: {
+        device: 'Desktop',
+        browser: 'Chrome',
+        operatingSystem: 'Windows',
+        ip: '192.168.1.42',
+        country: 'United States',
+        city: 'Springfield',
+        vpnDetected: false,
+        loginAt: Date.now(),
+      },
+      contextChanges: {
+        deviceChanged: false,
+        browserChanged: false,
+        osChanged: false,
+        ipChanged: false,
+        locationChanged: false,
+        vpnChanged: false,
+      },
+    });
+
+    const res = await request(app)
+      .get('/api/admin/session-status')
+      .set('x-test-user', JSON.stringify(ADMIN_USER));
+    const body = res.body;
+
+    expect(body.sessionContext).not.toBeNull();
+    expect(body.contextChanges).not.toBeNull();
+    expect(body.contextChanges.deviceChanged).toBe(false);
+    expect(body.contextChanges.browserChanged).toBe(false);
+    expect(body.contextChanges.osChanged).toBe(false);
+    expect(body.contextChanges.ipChanged).toBe(false);
+    expect(body.contextChanges.locationChanged).toBe(false);
+    expect(body.contextChanges.vpnChanged).toBe(false);
   });
 });

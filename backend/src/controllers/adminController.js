@@ -45,8 +45,8 @@ async function getSessionStatus(req, res, next) {
         timeUntilExpire: timeoutInfo.timeUntilExpire,
       },
       baseline: session.securityBaseline || null,
-      sessionContext: null,
-      contextChanges: null,
+      sessionContext: session.currentSessionContext || null,
+      contextChanges: session.contextChanges || null,
       activity: {
         documentsViewed: session.documentsViewed || 0,
         documentsDownloaded: session.documentsDownloaded || 0,

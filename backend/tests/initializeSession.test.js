@@ -109,6 +109,29 @@ describe("sessionMonitor.initializeSession()", () => {
     expect(typeof session.securityBaseline.loginAt).toBe("number");
   });
 
+  test("stores the current session context and zeroed context changes at initialization", async () => {
+    const req = mockReq();
+    const session = await sessionMonitor.initializeSession(req);
+
+    expect(session.currentSessionContext).not.toBeNull();
+    expect(session.currentSessionContext.device).toBe("Desktop");
+    expect(session.currentSessionContext.browser).toBe("Chrome");
+    expect(session.currentSessionContext.operatingSystem).toBe("Windows");
+    expect(session.currentSessionContext.country).toBe("Australia");
+    expect(session.currentSessionContext.city).toBe("Sydney");
+    expect(session.currentSessionContext.vpnDetected).toBe(false);
+    expect(typeof session.currentSessionContext.ip).toBe("string");
+    expect(typeof session.currentSessionContext.loginAt).toBe("number");
+
+    expect(session.contextChanges).not.toBeNull();
+    expect(session.contextChanges.deviceChanged).toBe(false);
+    expect(session.contextChanges.browserChanged).toBe(false);
+    expect(session.contextChanges.osChanged).toBe(false);
+    expect(session.contextChanges.ipChanged).toBe(false);
+    expect(session.contextChanges.locationChanged).toBe(false);
+    expect(session.contextChanges.vpnChanged).toBe(false);
+  });
+
   test("is idempotent: a second call reuses the existing session", async () => {
     const req = mockReq();
     const first = await sessionMonitor.initializeSession(req);
