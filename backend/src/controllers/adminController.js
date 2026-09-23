@@ -4,7 +4,10 @@ const User = require('../models/User');
 const LoginActivity = require('../models/LoginActivity');
 const Assessment = require('../models/Assessment');
 const { UPLOAD_DIR } = require('../middleware/upload');
-const { getSessionTimeoutInfo } = require('../services/sessionMonitor');
+const {
+  getSessionTimeoutInfo,
+  recordSessionEvent,
+} = require('../services/sessionMonitor');
 
 async function getSessionStatus(req, res, next) {
   try {
@@ -168,6 +171,16 @@ async function reviewAssessment(req, res, next) {
     assessment.reviewedAt = new Date();
 
     await assessment.save();
+
+    try {
+      await recordSessionEvent(req, 'verification_action');
+    } catch (sessionEventError) {
+      console.warn('Session event recording failed', {
+        eventType: 'verification_action',
+        error: sessionEventError.message,
+      });
+    }
+
     res.json({ message: 'Assessment reviewed', assessment });
   } catch (err) {
     next(err);

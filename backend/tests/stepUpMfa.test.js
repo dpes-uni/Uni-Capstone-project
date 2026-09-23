@@ -22,6 +22,18 @@ process.env.REQUIRE_SMTP = 'false';
 process.env.STEP_UP_VERIFY_WINDOW_MS = '120000'; // 2 minutes
 process.env.ADMIN_SIGNUP_KEY = 'stepup-admin-signup-key';
 
+// The admin controller destructures recordSessionEvent out of this module at
+// require time, so a plain jest.spyOn on the exported object would not be seen
+// by it. Mock only the function under test while preserving every other real
+// session-monitor behaviour (in-memory sessions, step-up state, etc.).
+jest.mock('../src/services/sessionMonitor', () => {
+  const actual = jest.requireActual('../src/services/sessionMonitor');
+  return {
+    ...actual,
+    recordSessionEvent: jest.fn(),
+  };
+});
+
 const request = require('supertest');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 const mongoose = require('mongoose');
@@ -635,6 +647,58 @@ describe('Section 6.4 — Step-Up MFA route enforcement', () => {
       .set('Authorization', `Bearer ${adminToken}`);
     expect(res.statusCode).toBe(404); // controller reached, assessment does not exist
     expect(res.body.stepUpRequired).toBeUndefined();
+  });
+
+  it('PATCH /api/admin/assessments/:id/review — admin, valid step-up → 200 and records verification_action', async () => {
+    const Assessment = require('../src/models/Assessment');
+    const assessment = await Assessment.create({
+      owner: adminUserId,
+      applicantName: 'Review Target',
+      status: 'pending',
+      documentFile: {
+        originalName: 'id-card.png',
+        storedName: 'stored-id-card.png',
+        mimeType: 'image/png',
+        size: 1024,
+        uploadedAt: new Date(),
+      },
+    });
+
+    sessionMonitor.sessions.set(`user:${adminUserId}`, {
+      stepUpVerified: {
+        purpose: 'stepup',
+        verifiedAt: new Date(),
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+
+    const res = await request(app)
+      .patch(`/api/admin/assessments/${assessment._id}/review`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'verified', notes: 'Looks good' });
+
+    // Step-up gate passed; the controller ran and the review succeeded.
+    expect(res.statusCode).toBe(200);
+    expect(res.body.message).toBe('Assessment reviewed');
+    expect(res.body.assessment.status).toBe('verified');
+    expect(res.body.assessment.reviewedBy.toString()).toBe(adminUserId);
+    expect(res.body.assessment.reviewedAt).toBeTruthy();
+
+    // The successful review must feed the existing session-monitoring pipeline.
+    expect(sessionMonitor.recordSessionEvent).toHaveBeenCalledTimes(1);
+    expect(sessionMonitor.recordSessionEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ user: expect.any(Object) }),
+      'verification_action'
+    );
+    expect(
+      sessionMonitor.recordSessionEvent.mock.calls[0][0].user._id.toString()
+    ).toBe(adminUserId);
+
+    // The review was persisted before the session event was recorded.
+    const persisted = await Assessment.findById(assessment._id);
+    expect(persisted.status).toBe('verified');
+    expect(String(persisted.reviewedBy)).toBe(adminUserId);
+    expect(persisted.reviewedAt).toBeInstanceOf(Date);
   });
 
   it('PATCH /api/admin/users/:id/role — admin, valid step-up → reaches controller', async () => {
