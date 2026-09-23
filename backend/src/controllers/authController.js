@@ -12,6 +12,7 @@ const {
   getSessionStatus,
   clearSessionByUserId,
   establishSessionBaseline,
+  initializeSession,
   refreshSessionBaselineAfterReauth,
   establishStepUpVerification,
   STEP_UP_VERIFY_WINDOW_MS,
@@ -494,6 +495,10 @@ async function verifyMfa(req, res, next) {
     // "requires re-authentication" flag left over from a previous session.
     clearSessionByUserId(user._id);
 
+    // Attach the authenticated user to the request so the session monitor
+    // can key the new session by userId (stable across access-token rotation).
+    req.user = user;
+
     user.trustedDevices.push({ deviceHash: otpDoc.deviceHash, userAgent: otpDoc.userAgent, ip: otpDoc.ip });
     user.lastLoginAt = new Date();
     await user.save();
@@ -522,8 +527,11 @@ async function verifyMfa(req, res, next) {
       },
     });
 
-    // Establish the security baseline for the new session.
-    await establishSessionBaseline(req);
+    // Initialize the monitored session for the newly authenticated user.
+    // Creates the session entry (keyed by userId) and establishes the
+    // security baseline. Idempotent: reuses an existing session if one was
+    // already created by an authenticated action.
+    await initializeSession(req);
 
     const contextFeatures = {
       device_seen_before: computedContextFeatures.device_seen_before,

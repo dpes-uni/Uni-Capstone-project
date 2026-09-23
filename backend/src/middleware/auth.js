@@ -66,11 +66,12 @@ async function protect(req, res, next) {
     if (sessionStatus?.requiresReauthentication) {
       const sessionTimeout = getSessionTimeoutInfo(req);
 
-      // 30-second grace period expired — force terminate the session.
+      // 10-minute re-authentication window expired without successful
+      // re-authentication — enforce the existing session security consequence.
       // Revoke the refresh token server-side so even the /auth/refresh
       // endpoint cannot extend the session.
       if (sessionTimeout?.highRiskTerminate) {
-        logger.warn('Session force-terminated: high-risk grace period expired', {
+        logger.warn('Session force-terminated: 10-minute re-authentication window expired', {
           user: req.user.email,
         });
 

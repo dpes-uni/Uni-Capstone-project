@@ -8,8 +8,9 @@
  * max of AI risk and accumulated risk — NOT just the AI's level alone.
  *
  * Before the fix: session.riskLevel = riskResult.risk_level (AI only),
- * causing getSessionTimeoutInfo() to never fire its 30-second high-risk
- * timeout because session.riskLevel never matched the effective risk.
+ * causing getSessionTimeoutInfo() to never fire its high-risk
+ * reauthentication window because session.riskLevel never matched the
+ * effective risk.
  */
 
 process.env.RISK_MEDIUM_THRESHOLD = '30';
@@ -117,7 +118,7 @@ describe('Session risk-state consistency — effective risk reflected in enforce
 
   // ── (c) getSessionTimeoutInfo sees correct high-risk state ──
 
-  test('(c) getSessionTimeoutInfo detects high-risk state and fires 30-second timeout', async () => {
+  test('(c) getSessionTimeoutInfo requires re-authentication for high risk without immediately terminating', async () => {
     // Build effective high risk.
     setRisk(mockMediumRisk());
     setRisk(mockMediumRisk());
@@ -132,18 +133,36 @@ describe('Session risk-state consistency — effective risk reflected in enforce
 
     const status = sessionMonitor.getSessionStatus(req);
     expect(status.riskLevel).toBe('high');
+    expect(status.requiresReauthentication).toBe(true);
 
-    // Immediately after risk check — timeout should NOT have fired yet.
+    // Immediately after the risk check the 10-minute re-auth window has
+    // NOT expired — the session must NOT be automatically terminated.
     const timeoutInfo0 = sessionMonitor.getSessionTimeoutInfo(req);
+    expect(timeoutInfo0.reauthRequired).toBe(true);
+    expect(timeoutInfo0.reauthWindowExpired).toBe(false);
     expect(timeoutInfo0.highRiskTerminate).toBe(false);
     expect(timeoutInfo0.timeUntilExpire).toBeGreaterThan(0);
+    expect(timeoutInfo0.timeUntilReauthExpire).toBeGreaterThan(0);
+  });
 
-    // Simulate 30+ seconds since the risk check.
+  test('(c) getSessionTimeoutInfo fires after the 10-minute re-auth window expires', async () => {
+    // Build effective high risk.
+    for (let i = 0; i < 5; i++) setRisk(mockMediumRisk());
+
+    const req = mockReq();
+    for (let i = 0; i < 5; i++) {
+      await sessionMonitor.recordSessionEvent(req, 'document_viewed');
+    }
+
+    // Simulate the 10-minute re-auth window elapsing without successful
+    // re-authentication.
     const session = sessionMonitor.sessions.get(`user:${req.user._id}`);
-    session.lastRiskCheckedAt = Date.now() - 35_000;
+    session.reauthRequiredSince = Date.now() - 11 * 60 * 1000;
 
     const timeoutInfo = sessionMonitor.getSessionTimeoutInfo(req);
+    expect(timeoutInfo.reauthWindowExpired).toBe(true);
     expect(timeoutInfo.highRiskTerminate).toBe(true);
+    expect(timeoutInfo.timeUntilReauthExpire).toBe(0);
     expect(timeoutInfo.timeUntilExpire).toBe(0);
   });
 
@@ -157,10 +176,11 @@ describe('Session risk-state consistency — effective risk reflected in enforce
     expect(status.riskLevel).toBe('low');
 
     const timeoutInfo = sessionMonitor.getSessionTimeoutInfo(req);
-    // High-risk termination should NOT be active for low effective risk.
+    // High-risk re-authentication must NOT be active for low effective risk.
     expect(timeoutInfo.highRiskTerminate).toBe(false);
-    // timeUntilExpire is 0 because high-risk timeout is not active;
-    // idle timeout is tracked separately on idleTimeout field.
+    expect(timeoutInfo.reauthRequired).toBe(false);
+    expect(timeoutInfo.reauthWindowExpired).toBe(false);
+    // Idle timeout is tracked separately on idleTimeout field.
     expect(timeoutInfo.idleTimeout).toBe(false);
   });
 

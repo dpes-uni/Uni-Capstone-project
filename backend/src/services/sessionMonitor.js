@@ -32,8 +32,21 @@ const STEP_UP_VERIFY_WINDOW_MS = Number(
 );
 
 // Session timeout tracking.
-const SESSION_IDLE_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes of inactivity
-const HIGH_RISK_TERMINATE_TIMEOUT_MS = 30 * 1000; // 30 seconds before forced termination
+const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes of inactivity
+
+// Re-authentication window after a session is flagged high/critical risk.
+//
+// This replaces the previous automatic high-risk termination (a separate
+// 30-second timer that revoked the refresh token and deleted the session).
+// A high/critical risk session is NOT automatically terminated. Instead the
+// existing requiresReauthentication flag is set and the user is given this
+// window to complete the dedicated re-authentication flow (/auth/reauth/*).
+// Until successful re-authentication, protected requests are denied with
+// reauthenticationRequired. After the window expires, the existing session
+// security mechanism (force-termination in auth.js protect) takes over.
+const REAUTH_REQUIRED_WINDOW_MS = Number(
+  process.env.REAUTH_REQUIRED_WINDOW_MS ?? 10 * 60 * 1000
+);
 
 // Re-authentication cooldown after successful re-auth.
 // During cooldown, moderate anomalies remain Monitor (no immediate MFA).
@@ -149,7 +162,14 @@ function classifySessionRisk(riskResult, actionType) {
 function getSessionTimeoutInfo(req) {
   const session = getSessionStatus(req);
   if (!session) {
-    return { idleTimeout: false, highRiskTerminate: false, timeUntilExpire: 0 };
+    return {
+      idleTimeout: false,
+      highRiskTerminate: false,
+      reauthRequired: false,
+      reauthWindowExpired: false,
+      timeUntilReauthExpire: 0,
+      timeUntilExpire: 0,
+    };
   }
 
   const now = Date.now();
@@ -157,19 +177,31 @@ function getSessionTimeoutInfo(req) {
   const timeUntilIdleExpire = Math.max(0, SESSION_IDLE_TIMEOUT_MS - timeSinceLastActivity);
   const isIdleTimedOut = timeSinceLastActivity >= SESSION_IDLE_TIMEOUT_MS;
 
-  let highRiskTerminate = false;
-  let timeUntilHighRiskExpire = 0;
+  // High/critical risk does NOT automatically terminate the session. It
+  // requires re-authentication and gives the user REAUTH_REQUIRED_WINDOW_MS
+  // to complete the dedicated re-auth flow. `highRiskTerminate` now means
+  // "the re-authentication window has expired without success" — the existing
+  // session security mechanism (auth.js protect) enforces the consequence.
+  const isHighRisk =
+    (session.riskLevel === 'high' || session.riskLevel === 'critical') &&
+    session.requiresReauthentication;
 
-  if (session.riskLevel === 'high' && session.recommendedAction === 'Require Additional Verification') {
-    const timeSinceRiskCheck = now - (session.lastRiskCheckedAt || now);
-    timeUntilHighRiskExpire = Math.max(0, HIGH_RISK_TERMINATE_TIMEOUT_MS - timeSinceRiskCheck);
-    highRiskTerminate = timeSinceRiskCheck >= HIGH_RISK_TERMINATE_TIMEOUT_MS;
+  let reauthWindowExpired = false;
+  let timeUntilReauthExpire = 0;
+
+  if (isHighRisk && session.reauthRequiredSince) {
+    const timeSinceReauthRequired = now - session.reauthRequiredSince;
+    timeUntilReauthExpire = Math.max(0, REAUTH_REQUIRED_WINDOW_MS - timeSinceReauthRequired);
+    reauthWindowExpired = timeSinceReauthRequired >= REAUTH_REQUIRED_WINDOW_MS;
   }
 
   return {
     idleTimeout: isIdleTimedOut,
-    highRiskTerminate,
-    timeUntilExpire: Math.min(timeUntilIdleExpire, timeUntilHighRiskExpire),
+    highRiskTerminate: reauthWindowExpired,
+    reauthRequired: isHighRisk,
+    reauthWindowExpired,
+    timeUntilReauthExpire,
+    timeUntilExpire: isHighRisk ? timeUntilReauthExpire : timeUntilIdleExpire,
   };
 }
 
@@ -259,6 +291,12 @@ function updateSessionRiskState(session, riskResult, actionType) {
   if (finalClass === 'high' || finalClass === 'critical') {
     session.requiresReauthentication = true;
     session.riskDecision = 'reauth_required';
+    // Record when the session was flagged so the re-authentication window
+    // can be enforced. Only stamp it on the transition into the flagged
+    // state; a session already flagged keeps its original deadline.
+    if (!session.reauthRequiredSince) {
+      session.reauthRequiredSince = Date.now();
+    }
   } else if (!session.requiresReauthentication) {
     session.requiresReauthentication = false;
     // Moderate risk → Monitor (session active, elevated, no MFA).
@@ -287,6 +325,7 @@ function clearSessionReauthentication(req) {
   session.accumulatedRisk = 0;
   session.accumulatedRiskUpdatedAt = null;
   session.reauthCooldownUntil = null;
+  session.reauthRequiredSince = null;
 
   return true;
 }
@@ -330,6 +369,11 @@ function getOrCreateSession(req) {
       riskLevel: 'low',
       reauthCooldownUntil: null,
 
+      // When the session was flagged for re-authentication. Used to enforce
+      // the REAUTH_REQUIRED_WINDOW_MS window. Null until the session is
+      // flagged high/critical risk.
+      reauthRequiredSince: null,
+
       // Security baseline captured at session start (for context-change detection).
       // Populated asynchronously by establishSessionBaseline().
       securityBaseline: null,
@@ -338,6 +382,28 @@ function getOrCreateSession(req) {
     sessions.set(key, session);
   }
 
+  return session;
+}
+
+/**
+ * Initialize the monitored session for a freshly authenticated user.
+ *
+ * Called once from the authentication flow after a successful MFA
+ * verification. Idempotent: if a session already exists (for example
+ * because a prior authenticated action created it via recordSessionEvent),
+ * the existing session is reused and only its security baseline is ensured.
+ * New sessions start with zero activity and no fabricated risk values.
+ *
+ * @param {object} req - Request carrying the authenticated user.
+ * @returns {Promise<object|null>} The session, or null if no authenticated user.
+ */
+async function initializeSession(req) {
+  if (!req?.user?._id) {
+    return null;
+  }
+
+  const session = getOrCreateSession(req);
+  await establishSessionBaseline(req);
   return session;
 }
 
@@ -793,7 +859,6 @@ async function refreshSessionBaselineAfterReauth(req) {
   if (!session) return false;
 
   const verifiedContext = await captureSessionContext(req);
-  const previousBaseline = session.securityBaseline;
   clearSessionReauthentication(req);
   // Start the cooldown: moderate anomalies remain Monitor.
   session.reauthCooldownUntil = Date.now() + REAUTH_COOLDOWN_MS;
@@ -892,6 +957,7 @@ function isStepUpVerificationRequired(req) {
 module.exports = {
   sessions,
   recordSessionEvent,
+  initializeSession,
   clearSession,
   clearSessionByUserId,
   clearSessionReauthentication,
