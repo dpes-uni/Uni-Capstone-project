@@ -6,6 +6,7 @@ const { requireRole } = require('../middleware/roles');
 const {
   getOverview,
   getSessionStatus,
+  getActiveSessions,
   updateUserRole,
   listAssessments,
   getAssessmentDocument,
@@ -17,6 +18,7 @@ router.use(protect, requireRole('admin'));
 
 router.get('/overview', getOverview);
 router.get('/session-status', getSessionStatus);
+router.get('/active-sessions', getActiveSessions);
 router.patch(
   '/users/:id/role',
   stepUpProtect,

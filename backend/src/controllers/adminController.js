@@ -35,7 +35,12 @@ async function getSessionStatus(req, res, next) {
       },
       aiRisk: {
         score: session.lastRiskResult?.risk_score ?? null,
-        level: session.lastRiskResult?.risk_level || session.riskLevel || null,
+        level: session.lastRiskResult?.risk_level ?? null,
+        unusualActivity: session.lastRiskResult?.unusual_activity ?? null,
+        confidence: session.lastRiskResult?.confidence ?? null,
+        reason: session.lastRiskResult?.reason ?? null,
+        assessedAt: session.lastRiskCheckedAt || null,
+        status: session.lastRiskResult ? 'assessed' : 'not_assessed',
       },
       accumulatedRisk: session.accumulatedRisk ?? 0,
       effectiveRiskLevel: session.riskLevel || 'low',
@@ -55,6 +60,76 @@ async function getSessionStatus(req, res, next) {
         failedActions: session.failedActions || 0,
         rapidActions: session.actionTimestamps?.length >= 5 || false,
       },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/admin/active-sessions
+ *
+ * Read-only admin listing of every currently active monitored session.
+ *
+ * Reads the existing in-memory sessionMonitor.sessions Map directly.
+ * It does NOT create sessions and does NOT mutate session state — the
+ * Map is only enumerated.
+ *
+ * Each entry returns only safe monitoring information. Tokens, passwords,
+ * OTPs, JWTs, refresh tokens, cookies and request headers are never
+ * returned.
+ */
+async function getActiveSessions(req, res, next) {
+  try {
+    const sessionMonitor = require('../services/sessionMonitor');
+
+    const sessions = Array.from(sessionMonitor.sessions.entries()).map(
+      ([key, session]) => {
+        return {
+          id: key,
+          user: {
+            id: session.userId || null,
+            username: session.username || null,
+            role: session.userRole || null,
+          },
+          startedAt: session.startedAt || null,
+          lastActivity: session.lastActivity || null,
+          sessionStatus: {
+            active: true,
+            requiresReauthentication: session.requiresReauthentication || false,
+            riskDecision: session.riskDecision || 'unknown',
+            recommendedAction: session.recommendedAction || null,
+          },
+          aiRisk: {
+            score: session.lastRiskResult?.risk_score ?? null,
+            level: session.lastRiskResult?.risk_level ?? null,
+            unusualActivity: session.lastRiskResult?.unusual_activity ?? null,
+            confidence: session.lastRiskResult?.confidence ?? null,
+            reason: session.lastRiskResult?.reason ?? null,
+            assessedAt: session.lastRiskCheckedAt || null,
+            status: session.lastRiskResult ? 'assessed' : 'not_assessed',
+          },
+          accumulatedRisk: session.accumulatedRisk ?? 0,
+          effectiveRiskLevel: session.riskLevel || 'low',
+          baseline: session.securityBaseline || null,
+          sessionContext: session.currentSessionContext || null,
+          contextChanges: session.contextChanges || null,
+          activity: {
+            documentsViewed: session.documentsViewed || 0,
+            documentsDownloaded: session.documentsDownloaded || 0,
+            documentsUploaded: session.documentsUploaded || 0,
+            verificationActions: session.verificationActions || 0,
+            failedActions: session.failedActions || 0,
+            rapidActions: session.actionTimestamps?.length >= 5 || false,
+          },
+        };
+      }
+    );
+
+    res.json({
+      active: true,
+      count: sessions.length,
+      sessions,
     });
   } catch (err) {
     next(err);
@@ -190,6 +265,7 @@ async function reviewAssessment(req, res, next) {
 module.exports = {
   getOverview,
   getSessionStatus,
+  getActiveSessions,
   updateUserRole,
   listAssessments,
   getAssessmentDocument,

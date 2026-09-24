@@ -406,7 +406,9 @@ def predict_session_risk():
             | "Require Email OTP"
             | "Require Additional Verification"
             | "Block Login",
-        "reason": "string"
+        "reason": "string",
+        "unusual_activity": boolean,
+        "confidence": float
     }
     """
 
@@ -524,6 +526,8 @@ def predict_session_risk():
                 .value
             ),
             "reason": final_session_result.reason,
+            "unusual_activity": final_session_result.unusual_activity,
+            "confidence": final_session_result.confidence,
         }
 
 

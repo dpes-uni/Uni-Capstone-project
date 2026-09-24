@@ -159,6 +159,11 @@ describe('GET /api/admin/session-status', () => {
 
     expect(body.aiRisk).toHaveProperty('score');
     expect(body.aiRisk).toHaveProperty('level');
+    expect(body.aiRisk).toHaveProperty('unusualActivity');
+    expect(body.aiRisk).toHaveProperty('confidence');
+    expect(body.aiRisk).toHaveProperty('reason');
+    expect(body.aiRisk).toHaveProperty('assessedAt');
+    expect(body.aiRisk).toHaveProperty('status');
 
     expect(body.timeout).toHaveProperty('idleTimeout');
     expect(body.timeout).toHaveProperty('highRiskTerminate');
@@ -311,5 +316,206 @@ describe('GET /api/admin/session-status', () => {
     expect(body.contextChanges.ipChanged).toBe(false);
     expect(body.contextChanges.locationChanged).toBe(false);
     expect(body.contextChanges.vpnChanged).toBe(false);
+  });
+
+  // --- 9: AI prediction and confidence are exposed ---
+
+  test('exposes the real AI prediction and confidence when assessed', async () => {
+    seedSession(ADMIN_USER._id, {
+      lastRiskResult: {
+        risk_score: 72,
+        risk_level: 'high',
+        recommended_action: 'Require Additional Verification',
+        unusual_activity: true,
+        confidence: 0.91,
+        reason: 'Session ML prediction: unusual_activity=True, confidence=91.0%',
+      },
+      lastRiskCheckedAt: new Date('2026-01-01T10:00:00Z'),
+    });
+
+    const res = await request(app)
+      .get('/api/admin/session-status')
+      .set('x-test-user', JSON.stringify(ADMIN_USER));
+    const body = res.body;
+
+    expect(body.aiRisk.status).toBe('assessed');
+    expect(body.aiRisk.score).toBe(72);
+    expect(body.aiRisk.level).toBe('high');
+    expect(body.aiRisk.unusualActivity).toBe(true);
+    expect(body.aiRisk.confidence).toBe(0.91);
+    expect(body.aiRisk.reason).toBe('Session ML prediction: unusual_activity=True, confidence=91.0%');
+    expect(body.aiRisk.assessedAt).toEqual(new Date('2026-01-01T10:00:00Z').toISOString());
+
+    // effectiveRiskLevel is a separate backend classification.
+    expect(body).toHaveProperty('effectiveRiskLevel');
+  });
+
+  test('returns not_assessed with null AI fields when the AI has not assessed the session', async () => {
+    seedSession(ADMIN_USER._id, {
+      lastRiskResult: null,
+      lastRiskCheckedAt: null,
+    });
+
+    const res = await request(app)
+      .get('/api/admin/session-status')
+      .set('x-test-user', JSON.stringify(ADMIN_USER));
+    const body = res.body;
+
+    expect(body.aiRisk.status).toBe('not_assessed');
+    expect(body.aiRisk.score).toBeNull();
+    expect(body.aiRisk.level).toBeNull();
+    expect(body.aiRisk.unusualActivity).toBeNull();
+    expect(body.aiRisk.confidence).toBeNull();
+    expect(body.aiRisk.reason).toBeNull();
+    expect(body.aiRisk.assessedAt).toBeNull();
+
+    // The effective session risk is never replaced by a fake AI level.
+    expect(body.effectiveRiskLevel).toBe('low');
+  });
+});
+
+describe('GET /api/admin/active-sessions', () => {
+  beforeEach(() => {
+    sessionMonitor.sessions.clear();
+    jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    sessionMonitor.sessions.clear();
+  });
+
+  test('unauthenticated request is rejected with 401', async () => {
+    const res = await request(app).get('/api/admin/active-sessions');
+    expect(res.status).toBe(401);
+  });
+
+  test('non-admin user is rejected with 403', async () => {
+    const res = await request(app)
+      .get('/api/admin/active-sessions')
+      .set('x-test-user', JSON.stringify(STUDENT_USER));
+    expect(res.status).toBe(403);
+  });
+
+  test('admin receives all seeded active sessions', async () => {
+    seedSession(ADMIN_USER._id);
+    seedSession(STUDENT_USER._id);
+
+    const res = await request(app)
+      .get('/api/admin/active-sessions')
+      .set('x-test-user', JSON.stringify(ADMIN_USER));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('active', true);
+    expect(res.body).toHaveProperty('count', 2);
+    expect(res.body.sessions).toHaveLength(2);
+  });
+
+  test('two or more different users appear in the response', async () => {
+    seedSession(ADMIN_USER._id);
+    seedSession(STUDENT_USER._id);
+
+    const res = await request(app)
+      .get('/api/admin/active-sessions')
+      .set('x-test-user', JSON.stringify(ADMIN_USER));
+
+    const ids = res.body.sessions.map((s) => s.id);
+    expect(ids).toContain('user:admin-001');
+    expect(ids).toContain('user:student-001');
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  test('admin and student can both exist in the returned sessions array', async () => {
+    seedSession(ADMIN_USER._id);
+    seedSession(STUDENT_USER._id, {
+      userRole: 'student',
+      username: 'test.student@university.edu',
+    });
+
+    const res = await request(app)
+      .get('/api/admin/active-sessions')
+      .set('x-test-user', JSON.stringify(ADMIN_USER));
+
+    const byId = Object.fromEntries(
+      res.body.sessions.map((s) => [s.id, s])
+    );
+
+    expect(byId['user:admin-001'].user.role).toBe('admin');
+    expect(byId['user:student-001'].user.role).toBe('student');
+  });
+
+  test('each returned session contains the expected monitoring fields', async () => {
+    seedSession(ADMIN_USER._id);
+    const res = await request(app)
+      .get('/api/admin/active-sessions')
+      .set('x-test-user', JSON.stringify(ADMIN_USER));
+
+    const session = res.body.sessions[0];
+
+    expect(session).toHaveProperty('user');
+    expect(session.user).toHaveProperty('id');
+    expect(session.user).toHaveProperty('username');
+    expect(session.user).toHaveProperty('role');
+
+    expect(session).toHaveProperty('startedAt');
+    expect(session).toHaveProperty('lastActivity');
+
+    expect(session).toHaveProperty('sessionStatus');
+    expect(session.sessionStatus).toHaveProperty('requiresReauthentication');
+    expect(session.sessionStatus).toHaveProperty('riskDecision');
+    expect(session.sessionStatus).toHaveProperty('recommendedAction');
+
+    expect(session).toHaveProperty('aiRisk');
+    expect(session.aiRisk).toHaveProperty('score');
+    expect(session.aiRisk).toHaveProperty('level');
+    expect(session.aiRisk).toHaveProperty('unusualActivity');
+    expect(session.aiRisk).toHaveProperty('confidence');
+    expect(session.aiRisk).toHaveProperty('reason');
+    expect(session.aiRisk).toHaveProperty('assessedAt');
+    expect(session.aiRisk).toHaveProperty('status');
+
+    expect(session).toHaveProperty('accumulatedRisk');
+    expect(session).toHaveProperty('effectiveRiskLevel');
+
+    expect(session).toHaveProperty('baseline');
+    expect(session).toHaveProperty('sessionContext');
+    expect(session).toHaveProperty('contextChanges');
+
+    expect(session).toHaveProperty('activity');
+    expect(session.activity).toHaveProperty('documentsViewed');
+    expect(session.activity).toHaveProperty('documentsDownloaded');
+    expect(session.activity).toHaveProperty('documentsUploaded');
+    expect(session.activity).toHaveProperty('verificationActions');
+    expect(session.activity).toHaveProperty('failedActions');
+    expect(session.activity).toHaveProperty('rapidActions');
+  });
+
+  test('does not return tokens, passwords, OTPs or secrets', async () => {
+    seedSession(ADMIN_USER._id);
+    const res = await request(app)
+      .get('/api/admin/active-sessions')
+      .set('x-test-user', JSON.stringify(ADMIN_USER));
+
+    const json = JSON.stringify(res.body);
+
+    expect(json).not.toContain('JWT_SECRET');
+    expect(json).not.toContain('refreshToken');
+    expect(json).not.toContain('otp');
+    expect(json).not.toContain('password');
+    expect(json).not.toContain('salt');
+    expect(json).not.toContain('verify');
+    expect(json).not.toContain('otpSecret');
+    expect(json).not.toContain('user-agent');
+    expect(json).not.toContain('cookie');
+  });
+
+  test('empty sessions map returns count 0 and an empty sessions array', async () => {
+    const res = await request(app)
+      .get('/api/admin/active-sessions')
+      .set('x-test-user', JSON.stringify(ADMIN_USER));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('active', true);
+    expect(res.body).toHaveProperty('count', 0);
+    expect(res.body.sessions).toEqual([]);
   });
 });

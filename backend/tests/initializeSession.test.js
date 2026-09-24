@@ -154,6 +154,63 @@ describe("sessionMonitor.initializeSession()", () => {
     expect(second.securityBaseline).not.toBeNull();
   });
 
+  test("refreshes baseline and current context after successful re-authentication", async () => {
+    const req = mockReq();
+    const session = await sessionMonitor.initializeSession(req);
+
+    // Simulate a context change that was detected before re-authentication.
+    session.contextChanges = {
+      deviceChanged: true,
+      browserChanged: true,
+      osChanged: true,
+      ipChanged: true,
+      locationChanged: true,
+      vpnChanged: true,
+    };
+    session.requiresReauthentication = true;
+    session.securityBaseline = {
+      device: "Desktop",
+      browser: "Chrome",
+      operatingSystem: "Windows",
+      ip: "192.168.1.9",
+      country: "Australia",
+      city: "Sydney",
+      vpnDetected: false,
+      loginAt: Date.now(),
+    };
+
+    const refreshed = await sessionMonitor.refreshSessionBaselineAfterReauth(req);
+
+    expect(refreshed).toBe(true);
+
+    // The new baseline is the freshly verified context.
+    expect(session.securityBaseline).not.toBeNull();
+    expect(session.securityBaseline.device).toBe("Desktop");
+    expect(session.securityBaseline.browser).toBe("Chrome");
+    expect(session.securityBaseline.operatingSystem).toBe("Windows");
+    expect(session.securityBaseline.country).toBe("Australia");
+    expect(session.securityBaseline.city).toBe("Sydney");
+    expect(session.securityBaseline.vpnDetected).toBe(false);
+    expect(typeof session.securityBaseline.ip).toBe("string");
+
+    // The current context is also the verified context.
+    expect(session.currentSessionContext).not.toBeNull();
+    expect(session.currentSessionContext).toEqual(session.securityBaseline);
+
+    // A successful re-authentication resets the comparison flags.
+    expect(session.contextChanges).not.toBeNull();
+    expect(session.contextChanges.deviceChanged).toBe(false);
+    expect(session.contextChanges.browserChanged).toBe(false);
+    expect(session.contextChanges.osChanged).toBe(false);
+    expect(session.contextChanges.ipChanged).toBe(false);
+    expect(session.contextChanges.locationChanged).toBe(false);
+    expect(session.contextChanges.vpnChanged).toBe(false);
+
+    // Re-authentication state is cleared and the cooldown is installed.
+    expect(session.requiresReauthentication).toBe(false);
+    expect(session.reauthCooldownUntil).toBeGreaterThan(Date.now());
+  });
+
   test("is idempotent across different users without cross-contamination", async () => {
     const admin = mockReq({ user: { _id: "admin-001", email: "admin@test.com", role: "admin" } });
     const student = mockReq({ user: { _id: "student-001", email: "student@test.com", role: "student" } });

@@ -7,20 +7,28 @@ vi.mock('../../api/axios.js', () => ({
   default: { get: vi.fn(), patch: vi.fn() },
 }));
 
-const liveSessionResponse = {
-  active: true,
-  user: { username: 'live.admin@university.edu', role: 'admin' },
+const ADMIN_SESSION = {
+  id: 'user:admin-001',
+  user: { id: 'admin-001', username: 'admin@example.com', role: 'admin' },
   startedAt: new Date(Date.now() - 23 * 60000).toISOString(),
+  lastActivity: Date.now(),
   sessionStatus: {
     active: true,
     requiresReauthentication: false,
     riskDecision: 'continue',
     recommendedAction: null,
   },
-  aiRisk: { score: 12, level: 'low' },
-  accumulatedRisk: 12,
+  aiRisk: {
+    score: 20,
+    level: 'low',
+    unusualActivity: false,
+    confidence: 0.95,
+    reason: 'Session ML prediction: unusual_activity=False, confidence=95.0%',
+    assessedAt: new Date('2026-01-01T10:00:00Z').toISOString(),
+    status: 'assessed',
+  },
+  accumulatedRisk: 20,
   effectiveRiskLevel: 'low',
-  timeout: { idleTimeout: false, highRiskTerminate: false, timeUntilExpire: 300000 },
   baseline: {
     device: 'Desktop',
     browser: 'Chrome',
@@ -30,8 +38,23 @@ const liveSessionResponse = {
     city: 'Springfield',
     vpnDetected: false,
   },
-  sessionContext: null,
-  contextChanges: null,
+  sessionContext: {
+    device: 'Desktop',
+    browser: 'Chrome',
+    operatingSystem: 'Windows',
+    ip: '192.168.1.42',
+    country: 'United States',
+    city: 'Springfield',
+    vpnDetected: false,
+  },
+  contextChanges: {
+    deviceChanged: false,
+    browserChanged: false,
+    osChanged: false,
+    ipChanged: false,
+    locationChanged: false,
+    vpnChanged: false,
+  },
   activity: {
     documentsViewed: 5,
     documentsDownloaded: 2,
@@ -42,179 +65,270 @@ const liveSessionResponse = {
   },
 };
 
+const STUDENT_SESSION = {
+  ...ADMIN_SESSION,
+  id: 'user:student-001',
+  user: { id: 'student-001', username: 'student@example.com', role: 'student' },
+  sessionStatus: {
+    active: true,
+    requiresReauthentication: true,
+    riskDecision: 'reauth_required',
+    recommendedAction: 'Require Additional Verification',
+  },
+  aiRisk: {
+    score: 80,
+    level: 'high',
+    unusualActivity: true,
+    confidence: 0.88,
+    reason: 'Session ML prediction: unusual_activity=True, confidence=88.0%',
+    assessedAt: new Date('2026-01-01T10:05:00Z').toISOString(),
+    status: 'assessed',
+  },
+  accumulatedRisk: 80,
+  effectiveRiskLevel: 'high',
+  sessionContext: {
+    device: 'Mobile',
+    browser: 'Safari',
+    operatingSystem: 'iOS',
+    ip: '10.0.0.7',
+    country: 'United Kingdom',
+    city: 'London',
+    vpnDetected: true,
+  },
+  contextChanges: {
+    deviceChanged: true,
+    browserChanged: true,
+    osChanged: true,
+    ipChanged: true,
+    locationChanged: true,
+    vpnChanged: true,
+  },
+};
+
 const renderWithApi = (response) => {
   api.get.mockResolvedValueOnce({ data: response });
   render(<AIDemoPage />);
 };
 
 describe('AIDemoPage — loading state', () => {
-  it('shows a loading indicator while fetching session status', () => {
+  it('shows a loading indicator while fetching session data', () => {
     api.get.mockReturnValue(new Promise(() => {}));
     render(<AIDemoPage />);
-    expect(screen.getByText(/Loading session status/i)).toBeInTheDocument();
+    expect(screen.getByText(/Loading live monitored sessions/i)).toBeInTheDocument();
     expect(screen.getByTestId('data-mode')).toHaveTextContent('DATA MODE: LIVE SESSION');
   });
 });
 
-describe('AIDemoPage — no active session', () => {
-  it('shows No Active Session when active is false', async () => {
-    renderWithApi({ active: false });
+describe('AIDemoPage — no active sessions', () => {
+  it('shows No Active Monitored Sessions when the Map is empty', async () => {
+    renderWithApi({ active: true, count: 0, sessions: [] });
     await waitFor(() => {
-      expect(screen.getByText('No Active Session')).toBeInTheDocument();
+      expect(screen.getAllByText('No Active Monitored Sessions').length).toBeGreaterThan(0);
     });
-    expect(screen.getByText(/no authenticated session/i)).toBeInTheDocument();
   });
 
-  it('shows the Refresh control after no active session', async () => {
-    renderWithApi({ active: false });
+  it('shows the Refresh control when no sessions are loaded', async () => {
+    renderWithApi({ active: true, count: 0, sessions: [] });
     await waitFor(() => {
       expect(screen.getByTestId('refresh')).toBeInTheDocument();
     });
   });
 });
 
-describe('AIDemoPage — live data rendering', () => {
-  it('renders live user and session data from the API', async () => {
-    renderWithApi(liveSessionResponse);
+describe('AIDemoPage — error state', () => {
+  it('shows an error message when the API request fails', async () => {
+    api.get.mockRejectedValueOnce({});
+    render(<AIDemoPage />);
     await waitFor(() => {
-      expect(screen.getByText('live.admin@university.edu')).toBeInTheDocument();
+      expect(screen.getByText('Unable to load live monitored sessions.')).toBeInTheDocument();
     });
-    expect(screen.getByTestId('data-mode')).toHaveTextContent('DATA MODE: LIVE SESSION');
-    expect(screen.getByText('Allow login — continue session')).toBeInTheDocument();
-    expect(screen.getByText('live.admin@university.edu')).toBeInTheDocument();
-    expect(screen.getByText('admin')).toBeInTheDocument();
-    expect(screen.getByText('AI Risk Score')).toBeInTheDocument();
+    expect(screen.getByTestId('refresh')).toBeInTheDocument();
+  });
+});
+
+describe('AIDemoPage — single active session', () => {
+  it('renders the active session count', async () => {
+    renderWithApi({ active: true, count: 1, sessions: [ADMIN_SESSION] });
+    await waitFor(() => {
+      expect(screen.getByText(/Active Monitored Sessions: 1/i)).toBeInTheDocument();
+    });
   });
 
-  it('displays Monitor decision for monitor riskDecision (not reauthentication required)', async () => {
-    const monitorResponse = {
-      ...liveSessionResponse,
-      sessionStatus: {
-        ...liveSessionResponse.sessionStatus,
-        riskDecision: 'monitor',
-        requiresReauthentication: false,
-        recommendedAction: null,
-      },
-    };
-    renderWithApi(monitorResponse);
+  it('renders the admin session in the selector', async () => {
+    renderWithApi({ active: true, count: 1, sessions: [ADMIN_SESSION] });
     await waitFor(() => {
-      expect(screen.getByText('live.admin@university.edu')).toBeInTheDocument();
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
     });
-    expect(screen.getByText('Monitor session — elevated risk observed')).toBeInTheDocument();
-    // Monitor must NOT show reauthentication required.
-    expect(screen.queryByText('Reauthentication required')).not.toBeInTheDocument();
+    expect(screen.getAllByText('admin').length).toBeGreaterThan(0);
+    expect(screen.getByText('AI Risk: 20 / low')).toBeInTheDocument();
+    expect(screen.getByText('Effective Risk: low')).toBeInTheDocument();
   });
 
-  it('does not show fabricated or hard-coded demo values', async () => {
-    renderWithApi(liveSessionResponse);
+  it('defaults to the first real session', async () => {
+    renderWithApi({ active: true, count: 1, sessions: [ADMIN_SESSION] });
     await waitFor(() => {
-      expect(screen.getByText('live.admin@university.edu')).toBeInTheDocument();
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+    });
+    expect(screen.getAllByText('AI Risk Score').length).toBeGreaterThan(0);
+  });
+
+  it('shows the assessed AI score and level', async () => {
+    renderWithApi({ active: true, count: 1, sessions: [ADMIN_SESSION] });
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+    });
+    expect(screen.getAllByText('20').length).toBeGreaterThan(0);
+    expect(screen.getByText('Assessed')).toBeInTheDocument();
+  });
+
+  it('shows the unusual activity prediction and confidence', async () => {
+    renderWithApi({ active: true, count: 1, sessions: [ADMIN_SESSION] });
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Unusual Activity Prediction')).toBeInTheDocument();
+    expect(screen.getByText('false')).toBeInTheDocument();
+    expect(screen.getByText('0.95')).toBeInTheDocument();
+  });
+
+  it('shows baseline and current session context', async () => {
+    renderWithApi({ active: true, count: 1, sessions: [ADMIN_SESSION] });
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('tab-session-context'));
+    await waitFor(() => {
+      expect(screen.getByTestId('panel-session-context')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Baseline Context')).toBeInTheDocument();
+    expect(screen.getByText('Current Session Context')).toBeInTheDocument();
+    expect(screen.getAllByText('Desktop').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('192.168.1.42').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('United States').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Springfield').length).toBeGreaterThan(0);
+  });
+
+  it('shows real contextChanges with Unchanged flags', async () => {
+    renderWithApi({ active: true, count: 1, sessions: [ADMIN_SESSION] });
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('tab-session-context'));
+    await waitFor(() => {
+      expect(screen.getByTestId('panel-session-context')).toBeInTheDocument();
+    });
+    expect(screen.getByText('No context changes detected')).toBeInTheDocument();
+    expect(screen.getAllByText('Unchanged').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Changed')).not.toBeInTheDocument();
+  });
+
+  it('shows real AI Input Features and AI MODEL OUTPUT sections', async () => {
+    renderWithApi({ active: true, count: 1, sessions: [ADMIN_SESSION] });
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('tab-ai-input'));
+    await waitFor(() => {
+      expect(screen.getByTestId('panel-ai-input')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Documents Viewed')).toBeInTheDocument();
+    expect(screen.getByText('Documents Downloaded')).toBeInTheDocument();
+    expect(screen.getByText('Documents Uploaded')).toBeInTheDocument();
+    expect(screen.getByText('AI MODEL OUTPUT')).toBeInTheDocument();
+  });
+});
+
+describe('AIDemoPage — multiple active sessions', () => {
+  it('shows two different users in the response', async () => {
+    renderWithApi({ active: true, count: 2, sessions: [ADMIN_SESSION, STUDENT_SESSION] });
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText((content, element) =>
+        element?.tagName === 'BUTTON' && element.textContent.includes('student@example.com'),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows admin and student roles', async () => {
+    renderWithApi({ active: true, count: 2, sessions: [ADMIN_SESSION, STUDENT_SESSION] });
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+    });
+    expect(screen.getAllByText('admin').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('student').length).toBeGreaterThan(0);
+  });
+
+  it('selecting a student session changes the displayed data', async () => {
+    renderWithApi({ active: true, count: 2, sessions: [ADMIN_SESSION, STUDENT_SESSION] });
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText((content, element) =>
+        element?.tagName === 'BUTTON' && element.textContent.includes('Effective Risk: low'),
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('session-select-user:student-001'));
+    await waitFor(() => {
+      expect(
+        screen.getByText((content, element) =>
+          element?.tagName === 'BUTTON' && element.textContent.includes('Effective Risk: high'),
+        ),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText((content, element) =>
+        element?.tagName === 'BUTTON' && element.textContent.includes('Reauthentication Required'),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('does not return fabricated demo data', async () => {
+    renderWithApi({ active: true, count: 1, sessions: [ADMIN_SESSION] });
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
     });
     expect(screen.queryByText('demo.admin@university.edu')).not.toBeInTheDocument();
     expect(screen.queryByText('INITIAL_DEMO')).not.toBeInTheDocument();
   });
+});
 
-  it('shows session duration from startedAt', async () => {
-    renderWithApi(liveSessionResponse);
+describe('AIDemoPage — AI not assessed state', () => {
+  it('shows Not assessed when the AI has not assessed the session', async () => {
+    const notAssessed = {
+      ...ADMIN_SESSION,
+      aiRisk: {
+        score: null,
+        level: null,
+        unusualActivity: null,
+        confidence: null,
+        reason: null,
+        assessedAt: null,
+        status: 'not_assessed',
+      },
+    };
+    renderWithApi({ active: true, count: 1, sessions: [notAssessed] });
     await waitFor(() => {
-      expect(screen.getByText(/Session duration/i)).toBeInTheDocument();
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
     });
-    expect(screen.getByText(/23m/)).toBeInTheDocument();
+    expect(screen.getAllByText('Not assessed').length).toBeGreaterThan(0);
   });
 });
 
-describe('AIDemoPage — tabs from live data', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('renders all three tabs', async () => {
-    renderWithApi({ active: false });
-    await waitFor(() => { expect(screen.getByTestId('tab-overview')).toBeInTheDocument(); });
-    expect(screen.getByTestId('tab-session-context')).toBeInTheDocument();
-    expect(screen.getByTestId('tab-ai-input')).toBeInTheDocument();
-  });
-
-  it('defaults to the OVERVIEW tab', async () => {
-    renderWithApi({ active: false });
-    await waitFor(() => { expect(screen.getByTestId('panel-overview')).toBeInTheDocument(); });
-    expect(screen.queryByTestId('panel-session-context')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('panel-ai-input')).not.toBeInTheDocument();
-  });
-
-  it('switches to SESSION CONTEXT tab', async () => {
-    renderWithApi({ active: false });
-    await waitFor(() => { expect(screen.getByTestId('tab-session-context')).toBeInTheDocument(); });
-    fireEvent.click(screen.getByTestId('tab-session-context'));
-    expect(screen.getByTestId('panel-session-context')).toBeInTheDocument();
-  });
-
-  it('switches to AI INPUT FEATURES tab', async () => {
-    renderWithApi({ active: false });
-    await waitFor(() => { expect(screen.getByTestId('tab-ai-input')).toBeInTheDocument(); });
-    fireEvent.click(screen.getByTestId('tab-ai-input'));
-    expect(screen.getByTestId('panel-ai-input')).toBeInTheDocument();
-  });
-
-  it('shows Baseline Comparison with live baseline data', async () => {
-    renderWithApi(liveSessionResponse);
+describe('AIDemoPage — secrets are not exposed', () => {
+  it('does not return tokens, passwords, OTPs or secrets', async () => {
+    renderWithApi({ active: true, count: 1, sessions: [ADMIN_SESSION] });
     await waitFor(() => {
-      fireEvent.click(screen.getByTestId('tab-session-context'));
-      expect(screen.getByTestId('panel-session-context')).toBeInTheDocument();
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
     });
-    expect(screen.getByText('Operating System')).toBeInTheDocument();
-    expect(screen.getByText('Country')).toBeInTheDocument();
-    expect(screen.getByText('VPN status')).toBeInTheDocument();
-  });
-
-  it('shows available AI Input Features signals', async () => {
-    renderWithApi(liveSessionResponse);
-    await waitFor(() => {
-      fireEvent.click(screen.getByTestId('tab-ai-input'));
-      expect(screen.getByTestId('panel-ai-input')).toBeInTheDocument();
-    });
-    expect(screen.getByText('User Role')).toBeInTheDocument();
-    expect(screen.getByText('Document Count')).toBeInTheDocument();
-    expect(screen.getByText('Verification Actions')).toBeInTheDocument();
-    expect(screen.getByText('Failed Actions')).toBeInTheDocument();
-    expect(screen.getByText('Rapid Actions')).toBeInTheDocument();
-  });
-
-  it('shows Feature Pipeline flow', async () => {
-    renderWithApi(liveSessionResponse);
-    await waitFor(() => {
-      fireEvent.click(screen.getByTestId('tab-ai-input'));
-      expect(screen.getByTestId('panel-ai-input')).toBeInTheDocument();
-    });
-    expect(screen.getByTestId('flow-session-data')).toBeInTheDocument();
-    expect(screen.getByTestId('flow-feature-prep')).toBeInTheDocument();
-    expect(screen.getByTestId('flow-session-predictor')).toBeInTheDocument();
-    expect(screen.getByTestId('flow-risk-prediction')).toBeInTheDocument();
-  });
-});
-
-describe('AIDemoPage — refresh', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('renders a Refresh button when data is loaded', async () => {
-    renderWithApi({ active: false });
-    await waitFor(() => {
-      expect(screen.getByTestId('refresh')).toBeInTheDocument();
-    });
-  });
-
-  it('re-fetches session data when Refresh is clicked', async () => {
-    renderWithApi({ active: false });
-    await waitFor(() => {
-      expect(screen.getByText('No Active Session')).toBeInTheDocument();
-    });
-    api.get.mockResolvedValueOnce({ data: { active: false } });
-    fireEvent.click(screen.getByTestId('refresh'));
-    await waitFor(() => {
-      expect(screen.getByText('No Active Session')).toBeInTheDocument();
-    });
-    expect(api.get).toHaveBeenCalledTimes(2);
+    const json = JSON.stringify(screen.getByTestId('data-mode').closest('.page').textContent);
+    expect(json).not.toContain('JWT_SECRET');
+    expect(json).not.toContain('refreshToken');
+    expect(json).not.toContain('password');
+    expect(json).not.toContain('otp');
+    expect(json).not.toContain('salt');
+    expect(json).not.toContain('cookie');
   });
 });

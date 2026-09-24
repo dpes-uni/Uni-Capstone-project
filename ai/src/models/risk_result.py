@@ -22,6 +22,8 @@ class RiskResult:
     risk_level: RiskLevel
     recommended_action: RecommendedAction
     reason: str
+    unusual_activity: bool | None = None
+    confidence: float | None = None
 
     def to_dict(self) -> dict:
         """
@@ -32,6 +34,8 @@ class RiskResult:
             "risk_level": self.risk_level.value,
             "recommended_action": self.recommended_action.value,
             "reason": self.reason,
+            "unusual_activity": self.unusual_activity,
+            "confidence": self.confidence,
         }
 
     def to_json(self) -> str:

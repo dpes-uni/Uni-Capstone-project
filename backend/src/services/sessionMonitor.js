@@ -896,6 +896,17 @@ async function refreshSessionBaselineAfterReauth(req) {
   // Start the cooldown: moderate anomalies remain Monitor.
   session.reauthCooldownUntil = Date.now() + REAUTH_COOLDOWN_MS;
   session.securityBaseline = verifiedContext;
+  // The verified context is now both the baseline and the current context,
+  // so a successful re-authentication starts with no context change.
+  session.currentSessionContext = verifiedContext;
+  session.contextChanges = {
+    deviceChanged: false,
+    browserChanged: false,
+    osChanged: false,
+    ipChanged: false,
+    locationChanged: false,
+    vpnChanged: false,
+  };
 
   // Record successful re-authentication.
   recordSecurityEvent({

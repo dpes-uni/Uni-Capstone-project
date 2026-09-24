@@ -50,17 +50,25 @@ function field(value) {
 export default function AIDemoPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
-  const [sessionData, setSessionData] = useState(null);
+  const [sessions, setSessions] = useState([]);
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [error, setError] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const { data } = await api.get('/admin/session-status');
-      setSessionData(data);
+      const { data } = await api.get('/admin/active-sessions');
+      const nextSessions = Array.isArray(data?.sessions) ? data.sessions : [];
+      setSessions(nextSessions);
+      setSelectedSessionId((prev) => {
+        if (prev && nextSessions.some((s) => s.id === prev)) {
+          return prev;
+        }
+        return nextSessions.length > 0 ? nextSessions[0].id : null;
+      });
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to load session status.');
+      setError(err?.response?.data?.message || 'Unable to load live monitored sessions.');
     } finally {
       setLoading(false);
     }
@@ -70,28 +78,36 @@ export default function AIDemoPage() {
     loadData();
   }, [loadData]);
 
-  const active = sessionData?.active === true;
+  const selectedSession = sessions.find((s) => s.id === selectedSessionId) || null;
+
+  const sessionData = selectedSession;
+  const active = sessionData != null;
   const user = sessionData?.user || {};
   const sessionStatus = sessionData?.sessionStatus || {};
   const aiRisk = sessionData?.aiRisk || {};
   const timeout = sessionData?.timeout || {};
   const baseline = sessionData?.baseline;
+  const sessionContext = sessionData?.sessionContext;
+  const contextChanges = sessionData?.contextChanges;
   const activity = sessionData?.activity || {};
 
   const documentCount = (activity.documentsViewed || 0) + (activity.documentsDownloaded || 0) + (activity.documentsUploaded || 0);
 
-  const baselineComparison = baseline ? [
-    { label: 'Device', current: field(baseline.device), changed: false },
-    { label: 'Browser', current: field(baseline.browser), changed: false },
-    { label: 'IP Address', current: field(baseline.ip), changed: false },
-    { label: 'Location', current: baseline.city && baseline.country ? `${field(baseline.city)}, ${field(baseline.country)}` : '—', changed: false },
-    { label: 'VPN', current: baseline.vpnDetected ? 'VPN detected' : 'No VPN', changed: false },
-  ] : [];
+  const contextChangeRows = [
+    { key: 'deviceChanged', label: 'Device', current: field(sessionContext?.device) },
+    { key: 'browserChanged', label: 'Browser', current: field(sessionContext?.browser) },
+    { key: 'osChanged', label: 'Operating System', current: field(sessionContext?.operatingSystem) },
+    { key: 'ipChanged', label: 'IP Address', current: field(sessionContext?.ip) },
+    { key: 'locationChanged', label: 'Location', current: sessionContext?.city && sessionContext?.country ? `${field(sessionContext.city)}, ${field(sessionContext.country)}` : '—' },
+    { key: 'vpnChanged', label: 'VPN', current: sessionContext?.vpnDetected ? 'VPN detected' : 'No VPN' },
+  ];
+
+  const aiAssessed = aiRisk.status === 'assessed';
 
   const noSessionContent = (
     <section className="panel">
-      <h2>No Active Session</h2>
-      <p>No authenticated session is available. Start a session and sign in as an administrator to view live security data.</p>
+      <h2>No Active Monitored Sessions</h2>
+      <p>No active monitored sessions are available. Start a session and sign in as an administrator to view live security data.</p>
     </section>
   );
 
@@ -102,7 +118,7 @@ export default function AIDemoPage() {
           <h1>AI Security Demo</h1>
         </header>
         <div className="alert alert-info" data-testid="data-mode">DATA MODE: LIVE SESSION</div>
-        <p>Loading session status…</p>
+        <p>Loading live monitored sessions…</p>
       </div>
     );
   }
@@ -124,9 +140,49 @@ export default function AIDemoPage() {
     <div className="page dashboard-page">
       <header className="page-header">
         <h1>AI Security Demo</h1>
-        <p>Live session data from the authenticated backend. DATA MODE: LIVE SESSION.</p>
+        <p>Live multi-user session data from the authenticated backend. DATA MODE: LIVE SESSION.</p>
       </header>
       <div className="alert alert-info" data-testid="data-mode">DATA MODE: LIVE SESSION</div>
+
+      <section className="panel" style={{ marginBottom: '16px' }}>
+        <h2>Active Monitored Sessions: {sessions.length}</h2>
+        {sessions.length === 0 ? (
+          <p className="empty-state">No Active Monitored Sessions</p>
+        ) : (
+          <ul className="session-list" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {sessions.map((session) => {
+              const sessUser = session?.user || {};
+              const sessAiRisk = session?.aiRisk || {};
+              const sessEffective = session?.effectiveRiskLevel || 'low';
+              const sessReauth = session?.sessionStatus?.requiresReauthentication;
+              const isSelected = session.id === selectedSessionId;
+              return (
+                <li key={session.id} style={{ marginBottom: '10px' }}>
+                  <button
+                    type="button"
+                    className={isSelected ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm'}
+                    data-testid={`session-select-${session.id}`}
+                    onClick={() => setSelectedSessionId(session.id)}
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px', width: '100%', textAlign: 'left' }}
+                  >
+                    <span>
+                      <strong>{field(sessUser.role)}</strong> — {field(sessUser.username)}
+                    </span>
+                    <span>
+                      AI Risk: {field(sessAiRisk.score)} / {field(sessAiRisk.level)}
+                    </span>
+                    <span>
+                      Effective Risk: {sessEffective}
+                      {sessReauth ? ' — Reauthentication Required' : ''}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
       <div role="tablist" aria-label="AI Security Demo tabs" style={{ display: 'flex', gap: '6px', marginBottom: '20px' }}>
         {TABS.map((tab) => (
           <button key={tab.key} type="button" role="tab" aria-selected={activeTab === tab.key} aria-controls={`panel-${tab.key}`} data-testid={tab.testId}
@@ -160,6 +216,18 @@ export default function AIDemoPage() {
               </section>
 
               <section className="panel">
+                <h2>AI Model Output</h2>
+                <dl className="detail-list">
+                  <dt>AI Assessment</dt><dd>{aiAssessed ? 'Assessed' : 'Not assessed'}</dd>
+                  <dt>AI Risk Score</dt><dd>{aiAssessed ? field(aiRisk.score) : 'Not assessed'}</dd>
+                  <dt>AI Risk Level</dt><dd>{aiAssessed ? <RiskBadge level={aiRisk.level} /> : 'Not assessed'}</dd>
+                  <dt>Unusual Activity Prediction</dt><dd>{aiAssessed ? field(aiRisk.unusualActivity) : 'Not assessed'}</dd>
+                  <dt>AI Confidence</dt><dd>{aiAssessed ? field(aiRisk.confidence) : 'Not assessed'}</dd>
+                  <dt>AI Reason</dt><dd>{aiAssessed ? field(aiRisk.reason) : 'Not assessed'}</dd>
+                </dl>
+              </section>
+
+              <section className="panel">
                 <h2>Recommended Action</h2>
                 <p>{field(sessionStatus.recommendedAction)}</p>
               </section>
@@ -169,7 +237,7 @@ export default function AIDemoPage() {
                 <table className="table">
                   <thead><tr><th>Source</th><th>Score</th><th>Level</th><th>Description</th></tr></thead>
                   <tbody>
-                    <tr><td>AI</td><td>{field(aiRisk.score)}</td><td><RiskBadge level={aiRisk.level} /></td><td>Session Predictor</td></tr>
+                    <tr><td>AI</td><td>{aiAssessed ? field(aiRisk.score) : 'Not assessed'}</td><td>{aiAssessed ? <RiskBadge level={aiRisk.level} /> : 'Not assessed'}</td><td>Session Predictor</td></tr>
                     <tr><td>Rule-Based</td><td>—</td><td>—</td><td>Login Risk Engine (not exposed by this endpoint)</td></tr>
                     <tr><td>Accumulated</td><td>{field(sessionData?.accumulatedRisk)}</td><td><RiskBadge level={sessionData?.effectiveRiskLevel} /></td><td>sessionMonitor accumulation / decay</td></tr>
                   </tbody>
@@ -205,7 +273,7 @@ export default function AIDemoPage() {
               <div className="alert alert-info">Live monitored session context from the authenticated backend.</div>
 
               <section className="panel">
-                <h2>Monitored Session Context</h2>
+                <h2>Baseline Context</h2>
                 <dl className="detail-list">
                   <dt>Device</dt><dd>{field(baseline?.device)}</dd>
                   <dt>Operating System</dt><dd>{field(baseline?.operatingSystem)}</dd>
@@ -214,37 +282,57 @@ export default function AIDemoPage() {
                   <dt>Country</dt><dd>{field(baseline?.country)}</dd>
                   <dt>City</dt><dd>{field(baseline?.city)}</dd>
                   <dt>VPN status</dt><dd>{baseline?.vpnDetected === true ? 'VPN detected' : 'No VPN'}</dd>
-                  <dt>Session duration</dt><dd>{formatDurationFromStart(sessionData?.startedAt)}</dd>
-                  <dt>Baseline refresh status</dt><dd>current</dd>
                 </dl>
               </section>
 
-              {baseline ? (
-                <section className="panel">
-                  <h2>Baseline Comparison</h2>
-                  <table className="table">
-                    <thead><tr><th>Attribute</th><th>Current</th><th>Status</th></tr></thead>
-                    <tbody>
-                      {baselineComparison.map((item) => (
-                        <tr key={item.label}>
-                          <td>{item.label}</td>
-                          <td>{item.current}</td>
-                          <td>{item.changed ? 'Changed' : 'Unchanged'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </section>
-              ) : (
-                <section className="panel">
-                  <h2>Baseline Comparison</h2>
-                  <p className="empty-state">Baseline data not available.</p>
-                </section>
-              )}
+              <section className="panel">
+                <h2>Current Session Context</h2>
+                <dl className="detail-list">
+                  <dt>Device</dt><dd>{field(sessionContext?.device)}</dd>
+                  <dt>Operating System</dt><dd>{field(sessionContext?.operatingSystem)}</dd>
+                  <dt>Browser</dt><dd>{field(sessionContext?.browser)}</dd>
+                  <dt>IP Address</dt><dd>{field(sessionContext?.ip)}</dd>
+                  <dt>Country</dt><dd>{field(sessionContext?.country)}</dd>
+                  <dt>City</dt><dd>{field(sessionContext?.city)}</dd>
+                  <dt>VPN status</dt><dd>{sessionContext?.vpnDetected === true ? 'VPN detected' : 'No VPN'}</dd>
+                </dl>
+              </section>
+
+              <section className="panel">
+                <h2>Baseline Comparison</h2>
+                <table className="table">
+                  <thead><tr><th>Attribute</th><th>Current</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {contextChangeRows.map((item) => (
+                      <tr key={item.key}>
+                        <td>{item.label}</td>
+                        <td>{item.current}</td>
+                        <td>{contextChanges?.[item.key] ? 'Changed' : 'Unchanged'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
 
               <section className="panel">
                 <h2>Context Changes</h2>
-                <p className="empty-state">Context change detection is performed by the backend and not exposed by this endpoint.</p>
+                {contextChanges ? (
+                  Object.entries(contextChanges).filter(([, value]) => value === true).length === 0 ? (
+                    <p className="empty-state">No context changes detected</p>
+                  ) : (
+                    <ul className="context-changes" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      {contextChangeRows
+                        .filter((item) => contextChanges?.[item.key] === true)
+                        .map((item) => (
+                          <li key={item.key}>
+                            {item.label}: <strong>Changed</strong>
+                          </li>
+                        ))}
+                    </ul>
+                  )
+                ) : (
+                  <p className="empty-state">Context change data not available.</p>
+                )}
               </section>
             </>
           )}
@@ -262,12 +350,12 @@ export default function AIDemoPage() {
                 <dl className="detail-list">
                   <dt>User Role</dt><dd><span className="signal-tag monitored">Monitored session context</span> {field(user.role)}</dd>
                   <dt>Session Duration</dt><dd><span className="signal-tag monitored">Monitored session context</span> {formatDurationFromStart(sessionData?.startedAt)}</dd>
-                  <dt>Document Count</dt><dd><span className="signal-tag monitored">Monitored session context</span> {documentCount}</dd>
+                  <dt>Documents Viewed</dt><dd><span className="signal-tag monitored">Monitored session context</span> {field(activity.documentsViewed)}</dd>
+                  <dt>Documents Downloaded</dt><dd><span className="signal-tag monitored">Monitored session context</span> {field(activity.documentsDownloaded)}</dd>
+                  <dt>Documents Uploaded</dt><dd><span className="signal-tag monitored">Monitored session context</span> {field(activity.documentsUploaded)}</dd>
                   <dt>Verification Actions</dt><dd><span className="signal-tag monitored">Monitored session context</span> {field(activity.verificationActions)}</dd>
                   <dt>Failed Actions</dt><dd><span className="signal-tag monitored">Monitored session context</span> {field(activity.failedActions)}</dd>
                   <dt>Rapid Actions</dt><dd><span className="signal-tag monitored">Monitored session context</span> {activity.rapidActions ? 'Yes' : 'No'}</dd>
-                  <dt>Unusual Activity</dt><dd className="unavailable">Not available from this endpoint</dd>
-                  <dt>Context Changes</dt><dd className="unavailable">Not available from this endpoint</dd>
                 </dl>
               </section>
 
@@ -293,10 +381,13 @@ export default function AIDemoPage() {
               </section>
 
               <section className="panel">
-                <h2>Model Output</h2>
+                <h2>AI MODEL OUTPUT</h2>
                 <dl className="detail-list">
-                  <dt>Risk Score</dt><dd>{field(aiRisk.score)}</dd>
-                  <dt>Risk Level</dt><dd><RiskBadge level={aiRisk.level} /></dd>
+                  <dt>Unusual Activity Prediction</dt><dd>{aiAssessed ? field(aiRisk.unusualActivity) : 'Not assessed'}</dd>
+                  <dt>Risk Score</dt><dd>{aiAssessed ? field(aiRisk.score) : 'Not assessed'}</dd>
+                  <dt>Risk Level</dt><dd>{aiAssessed ? <RiskBadge level={aiRisk.level} /> : 'Not assessed'}</dd>
+                  <dt>Confidence</dt><dd>{aiAssessed ? field(aiRisk.confidence) : 'Not assessed'}</dd>
+                  <dt>Reason</dt><dd>{aiAssessed ? field(aiRisk.reason) : 'Not assessed'}</dd>
                 </dl>
               </section>
             </>

@@ -153,6 +153,8 @@ class SessionPredictor:
             risk_score=risk_score,
             risk_level=risk_level,
             recommended_action=action,
+            unusual_activity=is_unusual,
+            confidence=confidence,
             reason=self._build_reason(is_unusual, confidence, session),
         )
 
