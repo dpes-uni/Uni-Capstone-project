@@ -6,6 +6,7 @@ const Assessment = require('../models/Assessment');
 const { UPLOAD_DIR } = require('../middleware/upload');
 const {
   getSessionTimeoutInfo,
+  getSessionTimeoutInfoForSession,
   recordSessionEvent,
 } = require('../services/sessionMonitor');
 
@@ -36,6 +37,7 @@ async function getSessionStatus(req, res, next) {
       aiRisk: {
         score: session.lastRiskResult?.risk_score ?? null,
         level: session.lastRiskResult?.risk_level ?? null,
+        recommendedAction: session.lastRiskResult?.recommended_action ?? null,
         unusualActivity: session.lastRiskResult?.unusual_activity ?? null,
         confidence: session.lastRiskResult?.confidence ?? null,
         reason: session.lastRiskResult?.reason ?? null,
@@ -47,6 +49,9 @@ async function getSessionStatus(req, res, next) {
       timeout: {
         idleTimeout: timeoutInfo.idleTimeout,
         highRiskTerminate: timeoutInfo.highRiskTerminate,
+        reauthRequired: timeoutInfo.reauthRequired,
+        reauthWindowExpired: timeoutInfo.reauthWindowExpired,
+        timeUntilReauthExpire: timeoutInfo.timeUntilReauthExpire,
         timeUntilExpire: timeoutInfo.timeUntilExpire,
       },
       baseline: session.securityBaseline || null,
@@ -103,6 +108,7 @@ async function getActiveSessions(req, res, next) {
           aiRisk: {
             score: session.lastRiskResult?.risk_score ?? null,
             level: session.lastRiskResult?.risk_level ?? null,
+            recommendedAction: session.lastRiskResult?.recommended_action ?? null,
             unusualActivity: session.lastRiskResult?.unusual_activity ?? null,
             confidence: session.lastRiskResult?.confidence ?? null,
             reason: session.lastRiskResult?.reason ?? null,
@@ -111,6 +117,27 @@ async function getActiveSessions(req, res, next) {
           },
           accumulatedRisk: session.accumulatedRisk ?? 0,
           effectiveRiskLevel: session.riskLevel || 'low',
+          loginRisk: {
+            ruleBased: {
+              score: session.loginRisk?.ruleBased?.score ?? null,
+              level: session.loginRisk?.ruleBased?.level ?? null,
+            },
+            ai: {
+              score: session.loginRisk?.ai?.score ?? null,
+              level: session.loginRisk?.ai?.level ?? null,
+            },
+          },
+          timeout: (() => {
+            const t = getSessionTimeoutInfoForSession(session);
+            return {
+              idleTimeout: t.idleTimeout,
+              highRiskTerminate: t.highRiskTerminate,
+              reauthRequired: t.reauthRequired,
+              reauthWindowExpired: t.reauthWindowExpired,
+              timeUntilReauthExpire: t.timeUntilReauthExpire,
+              timeUntilExpire: t.timeUntilExpire,
+            };
+          })(),
           baseline: session.securityBaseline || null,
           sessionContext: session.currentSessionContext || null,
           contextChanges: session.contextChanges || null,

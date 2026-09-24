@@ -32,7 +32,7 @@ const STEP_UP_VERIFY_WINDOW_MS = Number(
 );
 
 // Session timeout tracking.
-const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes of inactivity
+const SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes of inactivity
 
 // Re-authentication window after a session is flagged high/critical risk.
 //
@@ -182,6 +182,57 @@ function getSessionTimeoutInfo(req) {
   // to complete the dedicated re-auth flow. `highRiskTerminate` now means
   // "the re-authentication window has expired without success" — the existing
   // session security mechanism (auth.js protect) enforces the consequence.
+  const isHighRisk =
+    (session.riskLevel === 'high' || session.riskLevel === 'critical') &&
+    session.requiresReauthentication;
+
+  let reauthWindowExpired = false;
+  let timeUntilReauthExpire = 0;
+
+  if (isHighRisk && session.reauthRequiredSince) {
+    const timeSinceReauthRequired = now - session.reauthRequiredSince;
+    timeUntilReauthExpire = Math.max(0, REAUTH_REQUIRED_WINDOW_MS - timeSinceReauthRequired);
+    reauthWindowExpired = timeSinceReauthRequired >= REAUTH_REQUIRED_WINDOW_MS;
+  }
+
+  return {
+    idleTimeout: isIdleTimedOut,
+    highRiskTerminate: reauthWindowExpired,
+    reauthRequired: isHighRisk,
+    reauthWindowExpired,
+    timeUntilReauthExpire,
+    timeUntilExpire: isHighRisk ? timeUntilReauthExpire : timeUntilIdleExpire,
+  };
+}
+
+/**
+ * Calculate timeout information from an existing session object.
+ *
+ * Reuses the exact same semantics as getSessionTimeoutInfo(req) but does
+ * not require a request/user context — the session is passed in directly.
+ * Used by the admin endpoints, which enumerate sessions from the in-memory
+ * Map without an authenticated request.
+ *
+ * @param {object} session - A monitored session object.
+ * @returns {object} Timeout info in the same shape as getSessionTimeoutInfo.
+ */
+function getSessionTimeoutInfoForSession(session) {
+  if (!session) {
+    return {
+      idleTimeout: false,
+      highRiskTerminate: false,
+      reauthRequired: false,
+      reauthWindowExpired: false,
+      timeUntilReauthExpire: 0,
+      timeUntilExpire: 0,
+    };
+  }
+
+  const now = Date.now();
+  const timeSinceLastActivity = now - (session.lastActivity || now);
+  const timeUntilIdleExpire = Math.max(0, SESSION_IDLE_TIMEOUT_MS - timeSinceLastActivity);
+  const isIdleTimedOut = timeSinceLastActivity >= SESSION_IDLE_TIMEOUT_MS;
+
   const isHighRisk =
     (session.riskLevel === 'high' || session.riskLevel === 'critical') &&
     session.requiresReauthentication;
@@ -1020,6 +1071,7 @@ module.exports = {
   accumulateRisk,
   refreshSessionBaselineAfterReauth,
   getSessionTimeoutInfo,
+  getSessionTimeoutInfoForSession,
   isSessionReauthenticationRequired: (req) =>
     Boolean(getSessionStatus(req)?.requiresReauthentication),
   // Step-up MFA helpers

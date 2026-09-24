@@ -47,6 +47,36 @@ function field(value) {
   return value != null ? String(value) : '—';
 }
 
+/**
+ * Resolve the Recommended Action to display.
+ *
+ * Priority:
+ *   1. AI recommended action — only when the live session predictor has
+ *      actually assessed the session.
+ *   2. Session status recommended action from the backend.
+ *   3. Existing risk-decision mapping.
+ *   4. Transparent "Awaiting first monitored action" state — never a blank
+ *      dash for a normal unassessed session.
+ */
+function resolveRecommendedAction(aiRisk, sessionStatus) {
+  const aiAssessed = aiRisk?.status === 'assessed';
+
+  if (aiAssessed && aiRisk?.recommendedAction) {
+    return aiRisk.recommendedAction;
+  }
+
+  if (sessionStatus?.recommendedAction) {
+    return sessionStatus.recommendedAction;
+  }
+
+  const decision = getSecurityDecision(sessionStatus?.riskDecision);
+  if (decision && decision !== 'Unknown') {
+    return decision;
+  }
+
+  return 'Awaiting first monitored action';
+}
+
 export default function AIDemoPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
@@ -85,6 +115,9 @@ export default function AIDemoPage() {
   const user = sessionData?.user || {};
   const sessionStatus = sessionData?.sessionStatus || {};
   const aiRisk = sessionData?.aiRisk || {};
+  const loginRisk = sessionData?.loginRisk || {};
+  const ruleBasedRisk = loginRisk?.ruleBased || {};
+  const loginAiRisk = loginRisk?.ai || {};
   const timeout = sessionData?.timeout || {};
   const baseline = sessionData?.baseline;
   const sessionContext = sessionData?.sessionContext;
@@ -224,12 +257,13 @@ export default function AIDemoPage() {
                   <dt>Unusual Activity Prediction</dt><dd>{aiAssessed ? field(aiRisk.unusualActivity) : 'Not assessed'}</dd>
                   <dt>AI Confidence</dt><dd>{aiAssessed ? field(aiRisk.confidence) : 'Not assessed'}</dd>
                   <dt>AI Reason</dt><dd>{aiAssessed ? field(aiRisk.reason) : 'Not assessed'}</dd>
+                  <dt>AI Recommended Action</dt><dd>{aiAssessed ? field(aiRisk.recommendedAction) : 'Not assessed'}</dd>
                 </dl>
               </section>
 
               <section className="panel">
                 <h2>Recommended Action</h2>
-                <p>{field(sessionStatus.recommendedAction)}</p>
+                <p>{resolveRecommendedAction(aiRisk, sessionStatus)}</p>
               </section>
 
               <section className="panel">
@@ -237,8 +271,24 @@ export default function AIDemoPage() {
                 <table className="table">
                   <thead><tr><th>Source</th><th>Score</th><th>Level</th><th>Description</th></tr></thead>
                   <tbody>
-                    <tr><td>AI</td><td>{aiAssessed ? field(aiRisk.score) : 'Not assessed'}</td><td>{aiAssessed ? <RiskBadge level={aiRisk.level} /> : 'Not assessed'}</td><td>Session Predictor</td></tr>
-                    <tr><td>Rule-Based</td><td>—</td><td>—</td><td>Login Risk Engine (not exposed by this endpoint)</td></tr>
+                    <tr>
+                      <td>AI</td>
+                      <td>{aiAssessed ? field(aiRisk.score) : 'Not assessed'}</td>
+                      <td>{aiAssessed ? <RiskBadge level={aiRisk.level} /> : 'Not assessed'}</td>
+                      <td>Session Predictor</td>
+                    </tr>
+                    <tr>
+                      <td>Rule-Based</td>
+                      <td>{ruleBasedRisk.score != null ? field(ruleBasedRisk.score) : 'Not available'}</td>
+                      <td>{ruleBasedRisk.level != null ? <RiskBadge level={ruleBasedRisk.level} /> : 'Not available'}</td>
+                      <td>Login Risk Engine</td>
+                    </tr>
+                    <tr>
+                      <td>Login AI</td>
+                      <td>{loginAiRisk.score != null ? field(loginAiRisk.score) : 'Not available'}</td>
+                      <td>{loginAiRisk.level != null ? <RiskBadge level={loginAiRisk.level} /> : 'Not available'}</td>
+                      <td>Login AI service</td>
+                    </tr>
                     <tr><td>Accumulated</td><td>{field(sessionData?.accumulatedRisk)}</td><td><RiskBadge level={sessionData?.effectiveRiskLevel} /></td><td>sessionMonitor accumulation / decay</td></tr>
                   </tbody>
                 </table>
@@ -257,7 +307,10 @@ export default function AIDemoPage() {
                 <h2>Timeout State</h2>
                 <dl className="detail-list">
                   <dt>Idle Timeout</dt><dd>{timeout.idleTimeout ? 'Expired' : 'Active'}</dd>
+                  <dt>Reauthentication Required</dt><dd>{timeout.reauthRequired ? 'Yes' : 'No'}</dd>
                   <dt>High Risk Terminate</dt><dd>{timeout.highRiskTerminate ? 'Expired' : 'Active'}</dd>
+                  <dt>Reauth Window Expired</dt><dd>{timeout.reauthWindowExpired ? 'Yes' : 'No'}</dd>
+                  <dt>Time Until Reauth Expire</dt><dd>{formatTimeout(timeout.timeUntilReauthExpire)}</dd>
                   <dt>Time Until Expire</dt><dd>{formatTimeout(timeout.timeUntilExpire)}</dd>
                 </dl>
               </section>

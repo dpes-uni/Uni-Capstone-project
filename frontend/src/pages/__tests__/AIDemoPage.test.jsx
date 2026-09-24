@@ -332,3 +332,103 @@ describe('AIDemoPage — secrets are not exposed', () => {
     expect(json).not.toContain('cookie');
   });
 });
+
+describe('AIDemoPage — Risk Sources and AI Model Output', () => {
+  it('shows the real Rule-Based login risk score and level', async () => {
+    const withLoginRisk = {
+      ...ADMIN_SESSION,
+      loginRisk: {
+        ruleBased: { score: 40, level: 'medium' },
+        ai: { score: 20, level: 'low' },
+      },
+    };
+    renderWithApi({ active: true, count: 1, sessions: [withLoginRisk] });
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Rule-Based')).toBeInTheDocument();
+    expect(screen.getByText('40')).toBeInTheDocument();
+    expect(screen.getByText('medium risk')).toBeInTheDocument();
+    expect(screen.getByText('Login AI')).toBeInTheDocument();
+    expect(screen.getAllByText('20').length).toBeGreaterThan(0);
+  });
+
+  it('shows Not available for a login risk component that was genuinely unavailable', async () => {
+    const withNullAi = {
+      ...ADMIN_SESSION,
+      loginRisk: {
+        ruleBased: { score: 10, level: 'low' },
+        ai: { score: null, level: null },
+      },
+    };
+    renderWithApi({ active: true, count: 1, sessions: [withNullAi] });
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+    });
+    expect(screen.getAllByText('Not available').length).toBeGreaterThan(0);
+  });
+
+  it('shows the AI recommended action in the AI Model Output and Recommended Action sections', async () => {
+    const withAction = {
+      ...ADMIN_SESSION,
+      aiRisk: {
+        ...ADMIN_SESSION.aiRisk,
+        recommendedAction: 'Require Additional Verification',
+      },
+    };
+    renderWithApi({ active: true, count: 1, sessions: [withAction] });
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+    });
+    expect(screen.getByText('AI Recommended Action')).toBeInTheDocument();
+    expect(screen.getAllByText('Require Additional Verification').length).toBeGreaterThan(0);
+  });
+
+  it('shows Awaiting first monitored action before any AI assessment', async () => {
+    const notAssessed = {
+      ...ADMIN_SESSION,
+      sessionStatus: {
+        active: true,
+        requiresReauthentication: false,
+        riskDecision: 'unknown',
+        recommendedAction: null,
+      },
+      aiRisk: {
+        score: null,
+        level: null,
+        recommendedAction: null,
+        unusualActivity: null,
+        confidence: null,
+        reason: null,
+        assessedAt: null,
+        status: 'not_assessed',
+      },
+    };
+    renderWithApi({ active: true, count: 1, sessions: [notAssessed] });
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Awaiting first monitored action')).toBeInTheDocument();
+  });
+
+  it('shows the full timeout state including re-auth fields', async () => {
+    const withTimeout = {
+      ...ADMIN_SESSION,
+      timeout: {
+        idleTimeout: false,
+        highRiskTerminate: false,
+        reauthRequired: false,
+        reauthWindowExpired: false,
+        timeUntilReauthExpire: 600000,
+        timeUntilExpire: 600000,
+      },
+    };
+    renderWithApi({ active: true, count: 1, sessions: [withTimeout] });
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Reauthentication Required')).toBeInTheDocument();
+    expect(screen.getByText('Reauth Window Expired')).toBeInTheDocument();
+    expect(screen.getByText('Time Until Reauth Expire')).toBeInTheDocument();
+  });
+});

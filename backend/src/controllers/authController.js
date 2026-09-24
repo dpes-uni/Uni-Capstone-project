@@ -387,6 +387,10 @@ async function login(req, res, next) {
       riskScore: finalRisk.score,
       riskLevel: finalRisk.level,
       riskReasons: finalRisk.reasons,
+      ruleRiskScore: ruleRisk.score,
+      ruleRiskLevel: ruleRisk.level,
+      aiRiskScore: aiRisk.score > 0 ? aiRisk.score : null,
+      aiRiskLevel: aiRisk.score > 0 ? aiRisk.level : null,
       mfaRequired: true,
       mfaVerified: false,
       success: false, // becomes true once the session is actually issued
@@ -531,7 +535,24 @@ async function verifyMfa(req, res, next) {
     // Creates the session entry (keyed by userId) and establishes the
     // security baseline. Idempotent: reuses an existing session if one was
     // already created by an authenticated action.
-    await initializeSession(req);
+    const session = await initializeSession(req);
+
+    // Copy the persisted login risk components onto the in-memory monitored
+    // session so /admin/active-sessions can expose them. null means the
+    // component was genuinely unavailable (e.g. the AI service was down).
+    if (session && otpDoc.loginActivity) {
+      const activity = otpDoc.loginActivity;
+      session.loginRisk = {
+        ruleBased: {
+          score: activity.ruleRiskScore ?? null,
+          level: activity.ruleRiskLevel ?? null,
+        },
+        ai: {
+          score: activity.aiRiskScore ?? null,
+          level: activity.aiRiskLevel ?? null,
+        },
+      };
+    }
 
     const contextFeatures = {
       device_seen_before: computedContextFeatures.device_seen_before,

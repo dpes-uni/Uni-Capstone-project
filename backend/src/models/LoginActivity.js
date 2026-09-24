@@ -34,6 +34,18 @@ const loginActivitySchema = new mongoose.Schema(
     riskLevel: { type: String, enum: ['low', 'medium', 'high'], default: 'low' },
     riskReasons: { type: [String], default: [] },
 
+    // ---------------------------------------------------------------
+    // Individual risk components that drove the combined final risk.
+    // ruleRisk* is always populated from scoreLogin().
+    // aiRisk* is populated only when the Python AI service responded;
+    // null when the AI was genuinely unavailable.
+    // riskScore/riskLevel above remain the combined final values.
+    // ---------------------------------------------------------------
+    ruleRiskScore: { type: Number, default: null },
+    ruleRiskLevel: { type: String, enum: ['low', 'medium', 'high', null], default: null },
+    aiRiskScore: { type: Number, default: null },
+    aiRiskLevel: { type: String, enum: ['low', 'medium', 'high', null], default: null },
+
     mfaRequired: { type: Boolean, default: false },
     mfaVerified: { type: Boolean, default: false },
 

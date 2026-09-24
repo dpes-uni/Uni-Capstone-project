@@ -15,7 +15,7 @@ import RiskWarningPopup from '../components/RiskWarningPopup';
 
 const AuthContext = createContext(null);
 
-const IDLE_TIMEOUT_MS = 1.5 * 60 * 1000; // 1.5 minutes of inactivity
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes of inactivity
 const WARNING_DURATION_MS = 30 * 1000; // 30 second warning
 
 export function AuthProvider({ children }) {
