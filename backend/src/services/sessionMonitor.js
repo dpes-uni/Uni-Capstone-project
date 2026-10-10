@@ -715,6 +715,15 @@ async function recordSessionEvent(
       riskScore:
         riskResult.risk_score,
 
+      unusualActivity:
+        riskResult.unusual_activity,
+
+      confidence:
+        riskResult.confidence,
+
+      reason:
+        riskResult.reason,
+
       recommendedAction:
         riskResult.recommended_action,
 
@@ -723,6 +732,36 @@ async function recordSessionEvent(
 
       requiresReauthentication,
     };
+
+    // --------------------------------------------------------
+    // Terminal-only LIVE AI MODEL OUTPUT display.
+    //
+    // A clearly separated console block for the capstone demo.
+    // Uses the real AI result and session values already in
+    // scope. No calculation, no transformation, no mock data.
+    // The structured logger output below is unchanged.
+    // --------------------------------------------------------
+
+    console.log(
+      [
+        '',
+        '========================================',
+        '        LIVE AI MODEL OUTPUT',
+        '========================================',
+        `User:                 ${session.username}`,
+        `Event:                ${eventType}`,
+        `Risk Score:           ${riskResult.risk_score}`,
+        `Risk Level:           ${riskResult.risk_level}`,
+        `Unusual Activity:     ${riskResult.unusual_activity}`,
+        `Confidence:           ${riskResult.confidence}`,
+        `Reason:               ${riskResult.reason}`,
+        `Recommended Action:   ${riskResult.recommended_action}`,
+        `Accumulated Risk:     ${session.accumulatedRisk}`,
+        `Re-authentication:    ${requiresReauthentication}`,
+        '========================================',
+        '',
+      ].join('\n')
+    );
 
     if (requiresReauthentication) {
       logger.warn(
