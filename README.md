@@ -1,312 +1,270 @@
-# Assure Docs — MERN Backend & Frontend
+# AI-Assisted Anomaly Detection & Adaptive MFA Cybersecurity Solution
 
-A working **MongoDB + Express + React + Node.js** implementation of the *Assure Docs* identity
-verification platform, built around the "AI-assisted anomaly detection and adaptive MFA" concept
-from the original capstone brief.
+A capstone project implementing an **AI-assisted anomaly detection and adaptive multi-factor authentication (MFA)** cybersecurity solution, with Assure Docs serving as the supporting identity verification application environment.
 
-It includes:
+## Overview
 
-- Full authentication: signup, email verification, login, logout
-- **Adaptive MFA** — a rule-based risk engine scores every login (new device, new IP, recent
-  failed attempts) and only asks for a one-time email passcode when a login looks risky
-- Account lockout after repeated failed attempts
-- A protected **dashboard** with login activity and account stats
-- A protected **assessments** workspace (create/track document verification cases)
-- A dev-mode fallback so the whole thing runs **without any external email provider** — the
-  verification link / OTP code is printed to the backend console and returned in the API
-  response so you can copy-paste it straight into the UI
+This project implements a layered security approach combining:
+- **Rule-based risk analysis** for login attempts
+- **AI/ML-based anomaly detection** (Python service) 
+- **Adaptive MFA** with step-up verification and re-authentication flows
+- **Session monitoring** with risk accumulation and decay
+- **Context-change detection** for suspicious activity
+- **Comprehensive security event logging**
 
-```
-assure-docs/
-├── backend/     Express + MongoDB API
-├── frontend/    React (Vite) single-page app
-└── README.md    ← you are here
-```
+The solution protects user accounts by continuously assessing risk during authentication and active sessions and  prompts for additional verification when anomalous behavior is detected.
 
----
+## Key Features
 
-## 1. Prerequisites
+### Authentication & Authorization
+Users have to register with the required OTP verification via email.Users need to register with the required OTP verification via email.
+- Validate credentials during login + require email OTP for all successful logins
+- Instant access to files and folders based on user roles (Student, Agent, Institution, Administrator)
+JWT access tokens (15 minutes) + rotating refresh tokens (7 days)
+- Signup flow for the admin with unique OTP and private key protection
 
-- **Node.js 18+** and npm — check with `node -v` and `npm -v`
-- **MongoDB** running somewhere reachable, either:
-  - a local install (`mongod` running on `localhost:27017`), **or**
-  - a free [MongoDB Atlas](https://www.mongodb.com/atlas) cluster (get a connection string)
+### Adaptive Risk Assessment
+- **Rule based engine**: Logins are scored according to new device/IP, failed logins, trusted device status
+The service is built on Python and uses the Random Forest classifier for anomaly detection.
+Combined decision: Higher score of the Rule-based and AI assessment is used to decide the risk level
+- Risk thresholds: medium (30) and high (61) risk levels can be set using environment variables
+- Logins from impossible travel locations are logged as flags
 
-You do **not** need an email/SMTP account to run this locally — see "Dev-mode email" below.
+### Session Security
+- 24/7 monitoring of sessions with behavioral tracking
+- Risk accumulation based on suspicious events based on time decay.
+- Device detection, browser detection, OS detection, IP detection, location detection, VPN detection (context change detection)
+- **Re-authentication required**: If triggered, within 10 minutes the user must re-authenticate.
+- Step-up verification: Action-level MFA on sensitive operations (2 minutes verification window)
+When the user logs out or times out, the session will be automatically cleaned up.
 
----
+### Security Controls
+If logon attempts are made more than a certain number of times, the account is locked.The account is locked if the logon attempts are made more than a certain number of times (configurable).
+The use of device fingerprinting and trusted device management.Use of device fingerprinting and trusted device management.
+- Blocking of IP addresses and VPNs/Proxy detection
+Successful login history is used to help trust location learning.Successful login history is used for trusted location learning.
+- Rapid-action detection (behavioral biometrics)
+- Security event logging for audit trails
 
-## 2. Backend setup
+### Application Functionality
+- Dashboard: Activity and risk statistics for logins
+Assessments workspace: Document verification cases and track them (Assure Docs context)
+Administrator overview: System-wide statistics and active session monitoring.
+- **Role management**: Change role (with step-up protection for role changes)
 
+## Technology Stack
+
+- **Backend**: Node.js + Express + MongoDB (MERN stack)
+- **Frontend**: React + Vite
+- **AI Service**: Python + Flask + scikit-learn (Random Forest classifier)
+- **Communication**: RESTful APIs with JSON payloads
+- **Containerization**: Docker Compose for orchestration
+
+## Getting Started
+
+### Prerequisites
+- **Node.js 18+** and npm
+- **MongoDB** (local installation or MongoDB Atlas)
+- **Python 3.9+** (for AI service, optional for basic functionality)
+- **Docker & Docker Compose** (optional, for containerized deployment)
+
+### Backend Setup
 ```bash
 cd backend
 npm install
 cp .env.example .env
 ```
 
-Open `.env` and set at minimum:
-
-```
+Configure `.env` with at minimum:
+```env
 MONGO_URI=mongodb://127.0.0.1:27017/assure_docs
 JWT_SECRET=some_long_random_string
 CLIENT_URL=http://localhost:5173
 ```
 
-(Leave `SMTP_*` blank to use dev-mode email — see below.)
-
-Start MongoDB if it isn't already running, e.g.:
-
+Start MongoDB if not running:
 ```bash
-mongod --dbpath /path/to/your/data/folder
+# Local MongoDB
+mongod
+
+# OR using Docker (if installed)
+docker-compose up -d mongodb
 ```
 
-Then start the API:
-
+Start the API:
 ```bash
-npm run dev      # auto-restarts on file changes (nodemon)
+npm run dev      # Auto-restarts on file changes
 # or
-npm start        # plain node
+npm start        # Plain Node.js
 ```
 
-You should see:
-
-```
-Assure Docs API
-----------------------------------------
-Environment : development
-Listening   : http://localhost:5001
-Health check: http://localhost:5001/api/health
-----------------------------------------
-```
-
-Optional — seed a demo account with sample assessments:
-
+Optional - seed demo account:
 ```bash
-npm run seed
+npm run seed     # Creates demo@assuredocs.test / Password123!
 ```
 
-This creates `demo@assuredocs.test` / `Password123!` (already verified) plus three sample
-assessments.
+### AI Service Setup 
+```bash
+cd ai
+pip install -r requirements.txt  # If using virtual environment
+python src/main.py               # Starts on http://127.0.0.1:8000
+```
+Set `AI_SERVICE_URL` in backend `.env` if running locally.
 
----
-
-## 3. Frontend setup
-
-Open a **second terminal**:
-
+### Frontend Setup
 ```bash
 cd frontend
 npm install
 cp .env.example .env
 npm run dev
 ```
+Vite will be available at http://localhost:5173 (proxies `/api` to backend on port 5001).
 
-Vite will print a local URL, normally:
-
+### Docker Compose (Full Stack)
+```bash
+docker-compose up --build
 ```
-http://localhost:5173
-```
+Services:
+- MongoDB: `mongodb://localhost:27017`
+- Backend API: `http://localhost:5001`
+- AI Service: `http://localhost:8000`
+- Frontend: `http://localhost:5173`
 
-Open that in your browser. The dev server proxies all `/api/*` requests to the backend on port
-5000 (configured in `vite.config.js`), so you don't need to change anything else for local
-development.
+## Usage Guide
 
----
+### Regular User Flow
+1. **Signup**: Provide name, email, password, role → receive email OTP → verify OTP to create account
+2. **Login**: Enter email/password → receive email OTP (always required) → verify OTP to access account
+3. **Dashboard**: View login activity, risk statistics, and session information
+4. **Assessments**: Create and manage document verification cases
+5. **Profile Updates**: Modify name/role (requires step-up verification for role changes)
 
-## 4. Using the app
+### Administrator Flow
+1. **Admin Signup**: Visit `/admin/signup`, provide details + private `ADMIN_SIGNUP_KEY` → receive email OTP → verify
+2. **Admin Login**: Same as regular user but gains access to admin endpoints
+3. **Admin Dashboard**: System overview, active sessions, user management
 
-1. Go to `http://localhost:5173` and click **Get started** to sign up.
-2. Because no SMTP server is configured by default, the signup response includes a **dev
-   verification link** shown directly on the page — click it to verify your account.
-3. Sign in. On your **first** login from a new browser/device, the risk engine will flag it as
-   medium/high risk and route you to a one-time-passcode screen. The code is shown on screen in
-   dev mode (and printed in the backend terminal) — enter it to finish signing in.
-4. Once verified, that device is remembered, so future logins from the same browser skip the
-   extra step (as long as nothing else about the login looks unusual).
-5. Explore the **Dashboard** (login activity, risk stats) and **Assessments** (create/track
-   document verification cases) pages.
+### Security Flows Triggered by Anomalous Behavior
+- **Context Change** (new device/location): Login requires OTP (always) + may trigger re-authentication requirement
+- **High Risk Score** (≥61): Session marked for re-authentication (10-minute window to verify via `/auth/reauth/*`)
+- **Critical Risk Score** (≥81): Same as high risk but with stricter action thresholds
+- **Sensitive Actions**: Role changes, document verification, etc. require step-up verification (2-minute window)
 
-### Sending real emails (optional)
+## API Reference
 
-To send real emails instead of dev-mode links/codes, fill in the `SMTP_*` values in
-`backend/.env` (e.g. a Gmail app password, Mailtrap, SendGrid SMTP, etc.) and restart the
-backend. Once `SMTP_HOST`, `SMTP_USER` and `SMTP_PASS` are all set, the API automatically
-switches from dev-mode logging to actually sending mail.
+### Authentication (`/api/auth/*`)
+- `POST /register` - Begin signup (returns OTP for dev mode or sends via email)
+- `POST /register/verify` - Complete signup with OTP
+- `POST /login` - Step 1: credentials + risk assessment (always requires OTP via next step)
+- `POST /verify-mfa` - Step 2: submit login OTP
+- `POST /refresh` - Rotate access/refresh tokens
+- `POST /logout` - End session, revoke refresh token
+- `GET /me` - Current user profile
+- `POST /reauth/request` - Initiate re-authentication (when session high/critical risk)
+- `POST /reauth/verify` - Complete re-authentication with OTP
+- `POST /stepup/request` - Request step-up verification for sensitive actions
+- `POST /stepup/verify` - Complete step-up verification with OTP
 
----
+### User (`/api/users/*`) - Protected
+- `GET /dashboard-summary` - Stats for dashboard view
+- `GET /login-activity` - Full login history with risk scores
+- `PATCH /me` - Update profile (name/role)
 
-## 5. How adaptive MFA works
+### Administrator (`/api/admin/*`) - Protected + Admin Role
+- `GET /overview` - System statistics
+- `GET /session-status` - Current session risk state
+- `GET /active-sessions` - Monitor all active sessions
+- `PATCH /users/:id/role` - Change user role (requires step-up verification)
 
-On every login attempt the backend (`backend/src/utils/riskEngine.js`) checks:
+### Assessments (`/api/assessments/*`) - Protected
+- `GET /assessments` - List user's assessments
+- `POST /assessments` - Create new assessment
+- `PATCH /assessments/:id` - Update assessment status/notes
+- `DELETE /assessments/:id` - Delete assessment
 
-| Signal                          | Points |
-|----------------------------------|--------|
-| Device never seen before         | +40    |
-| IP address never seen before     | +25    |
-| 3+ recent failed login attempts  | +25    |
-| 1–2 recent failed attempts       | +10    |
+### Health & Monitoring
+- `GET /api/health` - Basic service status
+- `GET /api/health/ready` - MongoDB connection status
+- `GET /api/metrics` - Prometheus metrics
 
-- **Score < 30** → low risk → signed in immediately, device remembered
-- **Score 30–69** → medium risk → one-time passcode required
-- **Score ≥ 70** → high risk → one-time passcode required
+## Token Model
 
-Thresholds are configurable via `RISK_MEDIUM_THRESHOLD` / `RISK_HIGH_THRESHOLD` in
-`backend/.env`. This mirrors the rule-based half of the `ai/` module's design described in
-`docs/AI_ARCHITECTURE.md` in the original project, implemented in plain JavaScript so the whole
-stack runs without a separate Python process. The Python/ML module in `ai/` can later be wired in
-as an additional signal alongside (or instead of) this rule engine.
+### Access Token
+- **Format**: JWT (stateless)
+- **Expiry**: 15 minutes
+- **Storage**: 
+  - `Authorization: Bearer <token>` header (used by frontend)
+  - httpOnly cookie named `token` (duplicate for robustness)
+- **Usage**: Sent with each request to protected endpoints
 
----
+### Refresh Token
+- **Format**: Opaque string (hashed in MongoDB)
+- **Expiry**: 7 days
+- **Storage**: httpOnly cookie named `refreshToken` only (never exposed to JavaScript)
+- **Rotation**: New token issued on each use via `/api/auth/refresh`, old token revoked
+- **Revocation**: On logout, explicit revocation, or password/security events
 
-## 6. API overview
+### Security Properties
+- Refresh tokens are hashed before storage (like passwords)
+- Access tokens contain only user ID and issuance/expiry claims
+- Tokens are invalidated on password change or security events
+- No sensitive data stored in tokens
 
-All endpoints are prefixed with `/api`.
+## Documentation
 
-| Method | Endpoint                        | Auth | Description |
-|--------|----------------------------------|------|--------------|
-| GET    | `/health`                         | –    | Health check (DB + AI status, uptime, memory) |
-| GET    | `/health/ready`                   | –    | Readiness probe — 503 until MongoDB is connected |
-| POST   | `/auth/register`                  | –    | Create account, sends verification email |
-| GET    | `/auth/verify-email/:token`       | –    | Verify email address |
-| POST   | `/auth/resend-verification`       | –    | Resend verification email |
-| POST   | `/auth/login`                     | –    | Step 1 of login (password check + risk score) |
-| POST   | `/auth/verify-mfa`               | –    | Step 2 of login (submit OTP code) — returns a short-lived access JWT + httpOnly refresh cookie |
-| POST   | `/auth/refresh`                 | –    | Rotate tokens: issues a fresh access JWT using the refresh cookie, revokes the old refresh token |
-| POST   | `/auth/logout`                  | –    | Revoke the refresh token and clear cookies |
-| GET    | `/auth/me`                        | ✅   | Current user profile |
-| GET    | `/users/dashboard-summary`        | ✅   | Stats + recent activity for the dashboard |
-| GET    | `/users/login-activity`           | ✅   | Full login activity log |
-| PATCH  | `/users/me`                       | ✅   | Update name/role |
-| GET    | `/admin/overview`                 | ✅   | Admin-only system stats |
-| GET    | `/assessments`                    | ✅   | List your assessments |
-| POST   | `/assessments`                    | ✅   | Create an assessment |
-| PATCH  | `/assessments/:id`                | ✅   | Update status/notes |
-| DELETE | `/assessments/:id`                | ✅   | Delete an assessment |
-| GET    | `/metrics`                        | –    | Prometheus metrics for the backend |
-
-Protected routes accept the JWT either as `Authorization: Bearer <token>` (what the React app
-uses) or as an `httpOnly` cookie set automatically on login.
-
-## 7. Session & token model
-
-Login now issues two tokens (rotate-on-refresh):
-
-- **Access token** — a short-lived (15 min) JWT sent in the `Authorization` header (and an `httpOnly`
-  `token` cookie). The React app keeps it in `localStorage`.
-- **Refresh token** — a long-lived (7 day) **opaque** token stored only in an `httpOnly` `refreshToken`
-  cookie (never in JS). It is hashed before being persisted in MongoDB.
-
-`POST /api/auth/refresh` rotates the pair: the old refresh token is **revoked** and a fresh access
-+ refresh token is issued. `POST /api/auth/logout` revokes the current refresh token and clears both
-cookies. This replaces the long-lived bearer-only token model from earlier versions.
-
-## 8. Troubleshooting
-
-- **"MongoDB connection error"** — make sure `mongod` is running, or that your Atlas
-  `MONGO_URI` (including username/password) is correct and your IP is allow-listed on Atlas.
-- **CORS errors in the browser console** — confirm `CLIENT_URL` in `backend/.env` matches the
-  URL you're loading the frontend from (default `http://localhost:5173`).
-- **Frontend can't reach the API** — confirm the backend is running on port 5001 and
-  `frontend/.env`'s `VITE_API_URL` is either `/api` (proxy mode) or a full URL to your backend.
-- **"Please verify your email before signing in"** — use the dev verification link shown after
-  signup, or check the backend terminal for the printed link.
-- **Didn't get an OTP screen on a second device** — that's expected once a device/IP is
-  trusted; delete the user in MongoDB (or use a fresh browser/incognito window) to see the flow
-  again.
-
----
-
-## 9. Production notes
-
-This is a capstone-grade reference implementation. Before deploying it for real users, consider:
-
-- Serving the frontend as a static build (`npm run build` in `frontend/`) behind a CDN or the
-  Express server itself, rather than the Vite dev server (set `SERVE_FRONTEND=true`)
-- The access JWT still lives in `localStorage` for in-memory `Authorization` headers; the long-lived
-  refresh token is in an `httpOnly` cookie (not accessible to JS). For stronger XSS protection, drop
-  `localStorage` and rely solely on the `httpOnly` `token` cookie.
-- Refresh tokens rotate on every use and are revoked on logout (already implemented); consider
-  shortening the refresh TTL further or adding a token-allowlist DB table for revocation granularity.
-- Configuring a real SMTP provider (see section 4) and removing the `devVerificationLink` /
-  `devOtpCode` fields from API responses in production (they are already only included when
-  `NODE_ENV !== 'production'` or email delivery fails)
-- Adding automated tests — see the `tests/` folders (Jest backend, Vitest frontend)
+- [AI Architecture](docs/AI_ARCHITECTURE.md) - Design of the Python-based AI/ML risk assessment service
+- AI Setup - Instructions for configuring and running the anomaly detection service
+- Data Dictionary - Schema definitions for login attempts, session events, and security events
+- Model Evaluation - Performance metrics and validation results for the ML model
+- API Reference - Detailed endpoint specifications (see API section above)
 
 
-## Administrator signup + Gmail OTP
+## Configuration
 
-The project now includes a protected administrator signup flow:
+Key environment variables in backend `.env`:
 
-1. Open `/admin/signup`.
-2. Enter administrator details and the private `ADMIN_SIGNUP_KEY`.
-3. The backend generates a 6-digit OTP and sends it through Gmail SMTP.
-4. Open `/admin/verify-otp` and enter the OTP.
-5. Only after successful OTP verification is the `admin` user created in MongoDB with `isVerified: true`.
-6. Sign in through `/admin/login`. The existing adaptive MFA can still require another OTP for unusual logins.
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `MONGO_URI` | MongoDB connection string | `mongodb://localhost:27017/assure_docs` |
+| `JWT_SECRET` | Secret for signing access tokens | *Required* |
+| `JWT_REFRESH_SECRET` | Secret for signing refresh tokens | *Required* |
+| `AI_SERVICE_URL` | URL of Python AI service | `http://127.0.0.1:8000` |
+| `SMTP_*` | Email configuration (leave blank for dev mode) | *Blank* |
+| `CLIENT_URL` | Frontend URL for CORS/email links | `http://localhost:5173` |
+| `RISK_MEDIUM_THRESHOLD` | Score triggering medium risk | `30` |
+| `RISK_HIGH_THRESHOLD` | Score triggering high risk | `61` |
+| `RISK_CRITICAL_THRESHOLD` | Score triggering critical risk | `81` |
+| `OTP_EXPIRY_MINUTES` | Validity period for OTP codes | `10` |
+| `SESSION_RISK_DECAY_PER_SECOND` | Risk decay rate per second | `0.05` |
+| `REAUTH_REQUIRED_WINDOW_MS` | Time to complete re-authentication | `600000` (10 min) |
+| `STEP_UP_VERIFY_WINDOW_MS` | Time to complete step-up verification | `120000` (2 min) |
 
-### Gmail setup
+## Development Notes
 
-Use a Google account with 2-Step Verification enabled and create a Google App Password. Put the App Password in `backend/.env` as `SMTP_PASS`. Do not use your normal Gmail password.
+### Email Handling
+- **Development Mode**: When SMTP not configured, OTP codes and verification links are:
+  1. Printed to backend console
+  2. Returned in API responses (for dev/testing only)
+- **Production Mode**: Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, and set `REQUIRE_SMTP=true`
 
-Example:
+### Docker Compose Services
+The `docker-compose.yml` defines five services:
+1. `mongodb` - Database persistence
+2. `backend` - Node.js/Express API
+3. `ai-service` - Python anomaly detection
+4. `frontend` - React/Vite application
+5. `redis` - Optional cache/session store
 
-```env
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=yourgmail@gmail.com
-SMTP_PASS=your_16_character_google_app_password
-SMTP_FROM="Assure Docs <yourgmail@gmail.com>"
-ADMIN_SIGNUP_KEY=use-a-long-private-admin-signup-key
-ADMIN_OTP_EXPIRES_MINUTES=10
-```
+### Testing
+- Backend: `npm test` (Jest)
+- Frontend: `npm run test` (Vitest)
+- Tests cover authentication flows, risk assessment, and API endpoints
 
-Also set `MONGO_URI` to your MongoDB database. Never commit `.env` or the Gmail App Password to Git.
+## Project Context
 
-For production, keep the admin signup key private or replace public admin signup with an invitation-only workflow.
+This is a capstone project on the research and implementation of anomaly detection and adaptive MFA (Multi-Factor Authentication) cybersecurity controls using AI. The Assure Docs identity verification platform is designed to be:
+- A realistic application environment to test security features
+A demonstration context of the protection of user data provided by these controls.
+A testbed for exploring trade-offs between usability and security in adaptive authentication.
 
-
-## Email OTP authentication
-
-Assure Docs now requires a Gmail/email OTP every time a user successfully signs in and before a new user account is created.
-
-### Signup
-1. User enters name, email, role and password.
-2. Backend creates a pending signup OTP record in MongoDB.
-3. A 6-digit OTP is sent to the same email address through Gmail SMTP.
-4. The account is created and marked verified only after the OTP is correct.
-
-### Sign in
-1. User enters email and password.
-2. Credentials are checked.
-3. A new 6-digit OTP is generated and sent to the same email address on every successful credential check.
-4. No session token is issued until the OTP is verified.
-
-This applies to both normal users and administrators. The administrator signup flow also continues to require `ADMIN_SIGNUP_KEY` before sending its OTP.
-
-### Gmail SMTP
-Copy `backend/.env.example` to `backend/.env` and configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM`. For Gmail, use a Google App Password rather than the normal Gmail password.
-
-## Gmail OTP setup (required)
-
-The authentication flow now sends a fresh 6-digit OTP to the email address entered during **every signup and every sign-in**. The OTP is not displayed in the browser.
-
-1. Enable 2-Step Verification on the Gmail account that will send Assure Docs emails.
-2. Create a Google App Password for that account.
-3. Copy `backend/.env.example` to `backend/.env`.
-4. Set these values:
-
-```env
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=yourgmail@gmail.com
-SMTP_PASS=your_16_character_google_app_password
-SMTP_FROM="Assure Docs <yourgmail@gmail.com>"
-REQUIRE_SMTP=true
-```
-
-5. Set your MongoDB and admin signup settings in the same `.env` file.
-6. Restart the backend with `npm run dev`.
-
-The backend verifies the Gmail SMTP connection at startup. If Gmail is not configured or the App Password is invalid, the server stops with a clear error instead of showing a development OTP.
-
-**Security:** never commit `backend/.env`, your Gmail password, or your Google App Password to Git.
+It's not about the document verification functionality of Assure Docs, but the layered security approach of rule-based analysis, ML-based anomaly detection and adaptive verification flows.

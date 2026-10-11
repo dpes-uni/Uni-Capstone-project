@@ -1,6 +1,6 @@
 # AI Architecture
 
-# Overview
+## Overview
 
 This document describes the architecture of the AI module used in the **AI-Assisted Anomaly Detection and Adaptive MFA Identity & Document Verification Platform**.
 
@@ -9,7 +9,7 @@ The AI module is responsible for assessing login risk and assisting the authenti
 - Rule-based security analysis
 - Machine learning predictions
 
-AI acts as an independent service that receives login information, evaluates the risk, and returns a recommendation that the backend can use when deciding whether to allow a login or require additional verification.
+AI operates as a separate service that receives login or session information, evaluates risk, and returns a recommendation that the backend uses when deciding whether to allow activity or require additional verification.
 
 ---
 
@@ -19,12 +19,12 @@ The AI module performs the following tasks:
 
 - Analyse login attempts
 - Detect potentially suspicious behaviour
-- Predict login risk using Machine Learning
+- Predict login and session risk using Machine Learning
 - Support adaptive MFA decisions
 - Record authentication events for auditing
 - Generate and train AI datasets
 
-Future versions will also support continuous session monitoring after a user has successfully logged in.
+The system also supports session monitoring after login to identify suspicious activity and request re-authentication or additional verification when required.
 
 ---
 
@@ -50,47 +50,45 @@ The AI uses these behavioural differences when generating datasets and predictin
 
 # Folder Structure
 
-```
+```text
 ai/
-│
 ├── data/
 │   ├── source/
 │   │   └── platform_users.csv
-│   │
 │   ├── raw/
-│   │   └── login_attempts.csv
-│   │
+│   │   ├── login_attempts.csv
+│   │   └── session_events.csv
 │   └── processed/
-│
 ├── models/
 │   └── trained/
-│       └── login_risk_model.pkl
-│
 ├── scripts/
 │   ├── generate_login_dataset.py
-│   ├── train_login_model.py
-│   └── predict.py
-│
+│   ├── train_session_model.py
+│   └── evaluate_models.py
 ├── src/
+│   ├── api.py
+│   ├── predictor.py
 │   ├── config/
 │   ├── models/
 │   ├── services/
+│   │   └── model_trainer.py
 │   └── utils/
-│
 └── .venv/
 ```
 
-The **src** folder contains the production code used by the application.
+The **src** folder contains the AI service, prediction and training components used by the application.
 
-The **scripts** folder contains development tools such as dataset generation, model training and testing.
+The **scripts** folder contains development tools for dataset generation, model training and evaluation.
 
 ---
 
 # AI Workflow
 
-The AI follows the workflow below.
+The AI follows two workflows.
 
-```
+**Login risk assessment**
+
+```text
 Login Attempt
       │
       ▼
@@ -110,7 +108,25 @@ Final Risk Result
 Node.js Backend
 ```
 
-Each component has a single responsibility, making the system easier to maintain and test.
+**Session risk assessment**
+
+```text
+Session Activity
+      │
+      ▼
+Session Risk Predictor
+      │
+      ▼
+Backend Session Monitoring
+      │
+      ▼
+Context and Accumulated Risk Checks
+      │
+      ▼
+Continue Session or Require Verification
+```
+
+Each component has a specific responsibility, making the system easier to maintain and test.
 
 ---
 
@@ -154,11 +170,9 @@ The result is a RiskResult object.
 
 ## Predictor
 
-The Predictor loads the trained Machine Learning model and predicts the login risk based on the login information.
+The Predictor loads the trained login-risk Machine Learning model and predicts risk based on login information.
 
-The predictor only performs AI predictions.
-
-It does not make authentication decisions.
+The predictor performs AI predictions but does not make authentication decisions independently.
 
 ---
 
@@ -169,13 +183,29 @@ The Decision Engine combines:
 - Rule-Based Risk Assessment
 - Machine Learning Prediction
 
-It produces a single final RiskResult that will later be returned to the Node.js backend.
+It produces a single final RiskResult for the Node.js backend. The higher risk assessment takes precedence when the two assessments differ.
+
+---
+
+## SessionPredictor
+
+The SessionPredictor uses a separate Random Forest model to identify unusual session activity based on information such as session duration, document activity, failed actions and rapid activity.
+
+It returns a session-risk result that the backend can use when evaluating whether additional verification is needed.
+
+---
+
+## SessionMonitor
+
+The SessionMonitor in the Node.js backend monitors active sessions by comparing session context, tracking accumulated risk and applying risk thresholds.
+
+It can require re-authentication or step-up verification when suspicious activity or sensitive actions meet the relevant risk thresholds.
 
 ---
 
 ## ModelTrainer
 
-Responsible for training the Machine Learning model.
+Responsible for training the Machine Learning models.
 
 Tasks include:
 
@@ -210,13 +240,11 @@ The logger stores:
 
 # Dataset Generation
 
-The project does not rely on external datasets.
+The project does not rely on external training datasets. Instead, it generates synthetic login and session data for model training.
 
-Instead, it generates its own realistic login history.
+The login dataset generation process is:
 
-The process is:
-
-```
+```text
 platform_users.csv
         │
         ▼
@@ -226,10 +254,12 @@ generate_login_dataset.py
 login_attempts.csv
         │
         ▼
-Model Training
+Login Model Training
 ```
 
-This ensures the training data matches the business rules of the application.
+A separate `session_events.csv` dataset is used to train the Session Risk Model.
+
+Both datasets contain 500 records. As the data is synthetic, the results require further validation using representative, independently labelled data.
 
 ---
 
@@ -239,61 +269,64 @@ Current Machine Learning Algorithm:
 
 - Random Forest Classifier
 
-Training Dataset:
+Training Datasets:
 
-- login_attempts.csv
+- `login_attempts.csv`
+- `session_events.csv`
 
-Current Prediction Output:
+Current Login Model Output:
 
 - Low Risk
-- Medium Risk
 - High Risk
 
-The trained model is saved as:
+The login model is trained on Low- and High-risk labels only. Medium risk can still be identified by the rule-based assessment and combined decision process.
 
-```
-models/trained/login_risk_model.pkl
+The Session Risk Model predicts:
+
+- Normal Activity
+- Unusual Activity
+
+The trained models are saved under:
+
+```text
+models/trained/
 ```
 
 ---
 
 # Integration with Node.js
 
-The Node.js backend communicates with the AI module through the `predict.py` script.
+The Node.js backend communicates with the AI module through a **Python Flask API**, rather than executing `predict.py` directly.
 
 The integration process is:
 
-```
-Node.js
-
-↓
-
-JSON Input
-
-↓
-
-predict.py
-
-↓
-
-Predictor
-
-↓
-
-Decision Engine
-
-↓
-
-JSON Output
-
-↓
-
-Node.js
+```text
+Node.js Backend
+       │
+       ▼
+HTTP Request
+       │
+       ▼
+Python Flask API
+       │
+       ▼
+Risk Prediction
+       │
+       ▼
+JSON Response
+       │
+       ▼
+Node.js Backend
 ```
 
-The backend never imports Python code directly.
+The API provides the following endpoints:
 
-This keeps both systems independent and easier to maintain.
+- `GET /health` — Checks service health.
+- `POST /predict` — Predicts login risk.
+- `POST /score` — Alternative endpoint for login-risk prediction.
+- `POST /predict-session` — Predicts session risk.
+
+The backend never imports Python code directly. This keeps both systems independent and easier to maintain.
 
 ---
 
@@ -313,22 +346,17 @@ The objective is to produce a professional but achievable architecture suitable 
 
 # Future Improvements
 
-The current implementation focuses on login risk assessment.
+Further improvements may include:
 
-Future enhancements may include:
-
-- Continuous session monitoring
 - Additional anomaly detection techniques
 - Behavioural profiling
 - Impossible travel detection
 - Additional AI models
 
-These improvements are intentionally deferred until after the core system is complete to avoid unnecessary scope creep.
+These improvements can be considered after evaluating the current implementation.
 
 ---
 
 # Summary
 
-The AI module has been designed as an independent, reusable service that supports adaptive authentication for the Identity & Document Verification Platform.
-
-Its modular architecture separates rule-based security analysis, machine learning prediction, and decision making into individual components, making the system easier to maintain, test and integrate with the rest of the application.
+The AI module supports adaptive authentication through rule-based login assessment, machine learning predictions and session monitoring. Its components remain separate from the Node.js backend, which combines risk results with security controls to determine when additional verification is required.
